@@ -201,87 +201,126 @@ def draw_rtl_line(d, x_right, y, line, f, hl_words):
         x -= wl + space
 
 
-def badge(d, x, y, scale=1.0):
+def openverse_photo(query, min_w=1000):
+    """Openverse (WordPress/Creative Commons index, no key): commercial+modification-safe licences only."""
+    if not query:
+        return None
+    url = ("https://api.openverse.org/v1/images/?page_size=12&license_type=commercial,modification"
+           f"&mature=false&q={urllib.parse.quote(query)}")
+    try:
+        res = json.loads(_get(url)).get("results", [])
+    except Exception:
+        return None
+    words = [w.lower() for w in query.split() if len(w) > 3]
+    for r in res:
+        if (r.get("width") or 0) < min_w or (r.get("license") or "").lower() in ("nc", "nd", "by-nc", "by-nd"):
+            continue
+        title = (r.get("title") or "").lower() + " " + " ".join(t.get("name", "") for t in r.get("tags") or []).lower()
+        if words and sum(w in title for w in words) < max(1, len(words) // 2):
+            continue
+        try:
+            im = Image.open(io.BytesIO(_get(r["url"], 40))).convert("RGB")
+        except Exception:
+            continue
+        if im.width >= 800:
+            lic = f"CC {r.get('license', '').upper()} {r.get('license_version', '')}".replace("CC CC0", "CC0").replace("CC PDM", "Public Domain").strip()
+            return im, f"{(r.get('creator') or 'Openverse')[:40]} / {lic}"
+    return None
+
+
+def badge(d, x, y, scale=1.0, dark_text=False, anchor_right=False):
     f1 = font("Barlow-BlackItalic.ttf", int(40 * scale), raqm=False)
     f2 = font("Barlow-BlackItalic.ttf", int(22 * scale), raqm=False)
-    d.text((x, y), "KAHWA", font=f1, fill=WHITE, anchor="lm")
     lw = d.textlength("KAHWA", font=f1)
+    total = lw + 10 * scale + 104 * scale
+    if anchor_right:
+        x = x - total
+    d.text((x, y), "KAHWA", font=f1, fill=NAVY if dark_text else WHITE, anchor="lm")
     bx = x + lw + 10 * scale
     d.polygon([(bx + 8 * scale, y - 16 * scale), (bx + 104 * scale, y - 16 * scale), (bx + 96 * scale, y + 16 * scale),
                (bx, y + 16 * scale)], fill=RED)
     d.text((bx + 52 * scale, y + 1), "NEWS", font=f2, fill=WHITE, anchor="mm")
 
 
-def render(headline, category, urgent, out, photo_query=None, country_en=None, highlight="", entity=None):
-    src = (wiki_photo(entity) or commons_photo(photo_query) or wiki_photo(country_en and f"Capital of {country_en}")
-           or map_image(country_en))
-    canvas = Image.new("RGB", (W, H), NAVY)
-    credit = ""
-    if src:
-        img, credit = src
-        if not credit.startswith("خريطة"):
-            img = grade(cover(img, W, PH))
-        canvas.paste(img, (0, 0))
-    else:                                                      # brand pattern fallback
-        d0 = ImageDraw.Draw(canvas)
-        for i, a in enumerate((18, 12, 8)):
-            d0.polygon([(W - 520 + i * 140, 0), (W - 380 + i * 140, 0), (W - 780 + i * 140, PH),
-                        (W - 920 + i * 140, PH)], fill=(10 + a, 16 + a, 34 + a))
-    # fade photo into the text panel + top vignette for the badge
-    fade = Image.new("L", (1, H), 0)
-    for y in range(H):
-        if y < 170:
-            v = int(120 * (1 - y / 170))
-        elif y < PH - 330:
-            v = 0
-        elif y < PH:
-            v = int(255 * ((y - (PH - 330)) / 330) ** 1.6)
-        else:
-            v = 255
-        fade.putpixel((0, y), v)
-    canvas = Image.composite(Image.new("RGB", (W, H), NAVY), canvas, fade.resize((W, H)))
-    d = ImageDraw.Draw(canvas)
-
-    badge(d, 56, 70, 1.0)
-    date = datetime.now(timezone.utc).strftime("%d.%m.%Y")
-    d.text((W - 56, 70), date, font=font("Barlow-BlackItalic.ttf", 28, raqm=False), fill=(235, 235, 235), anchor="rm")
-
-    # headline block, bottom-anchored
-    f_tag = font("Tajawal-Black.ttf", 40)
-    size = 74
-    while True:
-        f_h = font("Tajawal-Black.ttf", size)
-        lines = wrap(d, headline, f_h, W - 130)
-        if len(lines) <= 4 or size <= 54:
-            break
-        size -= 4
-    lines = lines[:5]
-    lh = int(size * 1.42)
-    block_h = len(lines) * lh
-    base = H - 150 - block_h                                    # top of headline
-    # label on the seam
-    tag = "عاجل" if urgent else (category or "دولي")
-    tw = d.textlength(tag, font=f_tag, direction="rtl", language="ar")
-    ty = base - 92
-    xr = W - 64
-    d.polygon([(xr - tw - 56, ty), (xr + 8, ty), (xr - 6, ty + 64), (xr - tw - 70, ty + 64)], fill=RED)
-    if urgent:
-        d.ellipse([xr - tw - 44, ty + 25, xr - tw - 30, ty + 39], fill=WHITE)
-    d.text((xr - 22, ty + 31), tag, font=f_tag, fill=WHITE, anchor="rm", direction="rtl", language="ar")
-
-    hl = set(w.strip("،.:؛!؟\"«»") for w in (highlight or "").split())
-    y = base
+def draw_lines(d, lines, x_right, y, f, lh, hl, color):
+    space = d.textlength(" ", font=f)
     for ln in lines:
-        draw_rtl_line(d, W - 64, y, ln, f_h, hl)
+        x = x_right
+        for w in ln.split():
+            wl = d.textlength(w, font=f, direction="rtl", language="ar")
+            col = RED if w.strip("،.:؛!؟\"«»") in hl else color
+            d.text((x, y), w, font=f, fill=col, anchor="ra", direction="rtl", language="ar")
+            x -= wl + space
         y += lh
+    return y
 
-    # footer
-    d.line([(64, H - 104), (W - 64, H - 104)], fill=(40, 52, 76), width=2)
-    f_s = font("Tajawal-Medium.ttf", 26)
-    d.text((W - 64, H - 62), "قهوة نيوز | Kahwa News", font=f_s, fill=GREY, anchor="rm", direction="rtl", language="ar")
-    if credit:
-        f_c = font("Tajawal-Medium.ttf", 20)
-        cred = credit if credit.startswith("خريطة") else "صورة: " + credit
-        d.text((64, H - 62), cred[:70], font=f_c, fill=(110, 120, 140), anchor="lm", direction="rtl", language="ar")
+
+def fit(d, text, width, start, minimum, max_lines):
+    size = start
+    while True:
+        f = font("Tajawal-Black.ttf", size)
+        lines = wrap(d, text, f, width)
+        if len(lines) <= max_lines or size <= minimum:
+            return f, lines[:max_lines + 1], size
+        size -= 4
+
+
+def rounded(im, r):
+    m = Image.new("L", im.size, 0)
+    ImageDraw.Draw(m).rounded_rectangle([0, 0, im.width - 1, im.height - 1], r, fill=255)
+    return m
+
+
+def render(headline, category, urgent, out, photo_query=None, country_en=None, highlight="", entity=None):
+    """v3 — modelled on what CNN Arabic / Sky News Arabia actually run on Facebook (Oct 2026):
+    A) real photo -> full-bleed photo, dark bottom gradient, small logo, white 2-3 line headline.
+    B) no photo   -> clean white editorial card: logo top, black headline, image/map in a rounded frame.
+    No date, no big category banners; only a small red 'عاجل' pill for breaking news."""
+    photo = wiki_photo(entity) or commons_photo(photo_query) or openverse_photo(photo_query)
+    hl = set(w.strip("،.:؛!؟\"«»") for w in (highlight or "").split())
+    if photo:
+        img, credit = photo
+        canvas = cover(ImageEnhance.Contrast(img).enhance(1.05), W, H)
+        g = Image.new("L", (1, H), 0)
+        for y in range(H):
+            t = (y - H * 0.34) / (H * 0.40)
+            g.putpixel((0, y), int(242 * max(0, min(1, t)) ** 0.9) if t > 0 else (int(70 * (1 - y / 160)) if y < 160 else 0))
+        canvas = Image.composite(Image.new("RGB", (W, H), (6, 8, 14)), canvas, g.resize((W, H)))
+        d = ImageDraw.Draw(canvas)
+        f, lines, size = fit(d, headline, W - 140, 70, 52, 3)
+        lh = int(size * 1.38)
+        top = H - 110 - len(lines) * lh
+        badge(d, W - 70, top - 70, 0.95, anchor_right=True)
+        if urgent:
+            ft = font("Tajawal-Black.ttf", 30)
+            tw = d.textlength("عاجل", font=ft, direction="rtl", language="ar")
+            bx = W - 70 - d.textlength("KAHWA", font=font("Barlow-BlackItalic.ttf", 38, raqm=False)) - 140 - tw - 40
+            d.rounded_rectangle([bx, top - 92, bx + tw + 36, top - 48], 8, fill=RED)
+            d.text((bx + tw / 2 + 18, top - 71), "عاجل", font=ft, fill=WHITE, anchor="mm", direction="rtl", language="ar")
+        draw_lines(d, lines, W - 70, top, f, lh, hl, WHITE)
+        fc = font("Tajawal-Medium.ttf", 19)
+        d.text((70, H - 48), ("صورة أرشيفية: " + credit)[:76], font=fc, fill=(150, 156, 170), anchor="lm", direction="rtl", language="ar")
+    else:
+        mp = map_image(country_en)
+        credit = mp[1] if mp else ""
+        canvas = Image.new("RGB", (W, H), (255, 255, 255))
+        d = ImageDraw.Draw(canvas)
+        badge(d, W - 70, 96, 1.0, dark_text=True, anchor_right=True)
+        if urgent:
+            ft = font("Tajawal-Black.ttf", 30)
+            d.rounded_rectangle([70, 72, 170, 120], 8, fill=RED)
+            d.text((120, 96), "عاجل", font=ft, fill=WHITE, anchor="mm", direction="rtl", language="ar")
+        f, lines, size = fit(d, headline, W - 140, 66, 50, 4)
+        lh = int(size * 1.4)
+        y = draw_lines(d, lines, W - 70, 180, f, lh, hl, (14, 16, 22))
+        box_top = y + 40
+        bw, bh = W - 140, H - box_top - 110
+        if mp and bh > 300:
+            pic = cover(mp[0], bw, bh)
+            canvas.paste(pic, (70, box_top), rounded(pic, 28))
+        d.text((70, H - 60), credit, font=font("Tajawal-Medium.ttf", 20), fill=(120, 126, 140), anchor="lm",
+               direction="rtl", language="ar")
+        d.text((W - 70, H - 60), "قهوة نيوز", font=font("Tajawal-Bold.ttf", 24), fill=(14, 16, 22), anchor="rm",
+               direction="rtl", language="ar")
     canvas.save(out, "JPEG", quality=93, optimize=True, progressive=True)
     return credit
