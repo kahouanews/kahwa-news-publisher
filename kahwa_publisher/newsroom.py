@@ -30,6 +30,18 @@ FEEDS = {
 }
 
 # Algerian Law 23-19 + Meta policy kill-list: never touch these subjects automatically.
+# HARD RULE (user 2026-10-28): never mention Morocco, UAE, Algeria or Israel at all.
+BANNED_COUNTRIES = [
+    "المغرب", "مغربي", "مغربية", "المغاربة", "الرباط", "الدار البيضاء", "مراكش", "طنجة", "محمد السادس", "أخنوش", "المخزن",
+    "البوليساريو", "الصحراء الغربية",
+    "الإمارات", "الامارات", "إماراتي", "اماراتي", "إماراتية", "اماراتية", "أبوظبي", "أبو ظبي", "ابوظبي", "دبي", "الشارقة",
+    "محمد بن زايد", "بن زايد",
+    "الجزائر", "جزائري", "جزائرية", "الجزائريين", "تبون",
+    "إسرائيل", "اسرائيل", "إسرائيلي", "اسرائيلي", "إسرائيلية", "اسرائيلية", "الإسرائيليين", "الاسرائيليين",
+    "تل أبيب", "تل ابيب", "نتنياهو", "الكنيست", "كاتس", "آيزنكوت", "هرتسوغ", "الجيش الإسرائيلي", "الاحتلال",
+    "Morocco", "Moroccan", "UAE", "Emirates", "Emirati", "Dubai", "Abu Dhabi", "Algeria", "Algerian", "Israel", "Israeli",
+]
+
 BLOCK = [
     "الجزائر", "جزائري", "جزائرية", "تبون", "شنقريحة", "الحراك", "القبائل", "الماك",
     "حماس تتبنى", "قطع رأس", "إعدام علني", "انتحار", "اغتصاب", "مشاهد مروعة", "فيديو صادم",
@@ -114,11 +126,22 @@ def cluster(items):
     return sorted(clusters, key=lambda c: -c["score"])
 
 
+_BANNED_RE = re.compile(
+    r"(?<![\w])(?:[وفبلك]{0,2})(?:ال)?(?:" + "|".join(re.escape(k) for k in sorted(BANNED_COUNTRIES, key=len, reverse=True)) + r")(?![\w])",
+    re.IGNORECASE)
+
+
+def banned_country(text):
+    t = (text or "").replace("\u0640", "")
+    t = re.sub(r"[\u064B-\u0652]", "", t)  # drop harakat
+    return bool(_BANNED_RE.search(t))
+
+
 def blocked(c):
     text = " ".join(i["title"] + " " + i["summary"] for i in c["items"])
     words = set(norm(text).split())
     sport_hits = sum((k in text) if " " in k else (norm(k) in words) for k in SPORTS)
-    return any(b in text for b in BLOCK) or sport_hits >= 2
+    return any(b in text for b in BLOCK) or banned_country(text) or sport_hits >= 2
 
 
 def load_seen():
@@ -147,12 +170,12 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 - لا تنسخ أي جملة من المصادر؛ أعد الصياغة كلياً وادمج المعلومات من كل المصادر.
 - الدقة أولاً: كل جملة يجب أن تكون واضحة المعنى ومطابقة لما في المصادر حرفياً من حيث الوقائع.
 - لا تخترع أي رقم أو اسم أو تصريح غير موجود في المصادر. إذا كانت المعلومات غير مؤكدة قل "بحسب التقارير".
-- ممنوع الأخبار الرياضية تماماً. حياد تام، بلا رأي، بلا سخرية، بلا تحريض، بلا روابط، بلا ذكر للجزائر.
+- ممنوع الأخبار الرياضية تماماً. حياد تام، بلا رأي، بلا سخرية، بلا تحريض، بلا روابط. ممنوع منعاً صارماً ذكر المغرب أو الإمارات أو الجزائر أو إسرائيل بأي شكل.
 - البنية: سطر أول جذاب يبدأ بـ 🔴 (أو 🟡 إن لم يكن عاجلاً)، ثم 3 إلى 5 أسطر قصيرة بالتفاصيل الأهم، ثم سطر "لماذا يهم؟" بجملة واحدة، ثم سؤال قصير يدعو للنقاش، ثم 3 وسوم عربية.
 - اذكر في سطر أخير: "المصادر: " ثم أسماء المؤسسات فقط بدون روابط.
 أعد JSON فقط بهذا الشكل:
 {"headline": "عنوان للصورة لا يتجاوز 70 حرفاً", "highlight": "كلمتان أو ثلاث من العنوان نفسه حرفياً هي الأهم", "category": "كلمة واحدة: سياسة/اقتصاد/علوم/صحة/تكنولوجيا/بيئة/دبلوماسية/دولي", "urgent": true/false, "entity": "عنوان مقالة ويكيبيديا الإنجليزية للشخص أو المكان أو المؤسسة الأبرز في الخبر بالضبط (مثال: Benjamin Netanyahu)", "photo_query": "2-4 English words to find a relevant real photo", "country_en": "English name of the main country", "post": "نص المنشور كاملاً", "safe": true/false}
-اجعل "safe" = false إذا كان الخبر رياضياً أو عن الجزائر أو الدين أو يتضمن عنفاً مصوراً أو معلومات لا يمكن التحقق منها.
+اجعل "safe" = false إذا كان الخبر رياضياً أو يذكر المغرب أو الإمارات أو الجزائر أو إسرائيل أو عن الدين أو يتضمن عنفاً مصوراً أو معلومات لا يمكن التحقق منها.
 
 المصادر:
 """
@@ -217,7 +240,8 @@ def write_post(c):
             sum((k in post) if " " in k else (norm(k) in pwords) for k in SPORTS) >= 2:
         print(json.dumps({"qa_reason": "sports"}))
         return None
-    if not d.get("safe", False) or len(post) < 120 or any(b in post for b in BLOCK[:8]):
+    if not d.get("safe", False) or len(post) < 120 or any(b in post for b in BLOCK) or \
+            banned_country(post + " " + " ".join(str(d.get(k, "")) for k in ("entity", "photo_query", "country_en", "highlight"))):
         print(json.dumps({"qa_reason": "unsafe/short"}))
         return None
     # fact-check pass: a second, independent read compares every claim with the sources
