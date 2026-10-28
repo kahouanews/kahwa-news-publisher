@@ -1,0 +1,36 @@
+name: newsroom
+on:
+  schedule:
+    - cron: "13 5-22/2 * * *"   # every 2h, 06:13-23:13 Algeria time
+  workflow_dispatch:
+permissions:
+  contents: write
+  issues: write
+concurrency:
+  group: publisher
+  cancel-in-progress: false
+jobs:
+  write:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -q feedparser "pillow>=10.1"
+      - name: Fetch, verify across outlets, write original posts, render cards
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python -m kahwa_publisher.newsroom
+      - name: Commit queue + cards
+        run: |
+          git config user.name "kahwa-bot"
+          git config user.email "kahwa-bot@users.noreply.github.com"
+          git add -A queue state media
+          git diff --cached --quiet || git commit -m "newsroom $(date -u +%FT%TZ)"
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
+      - name: Clean old cards (keep 7 days)
+        run: |
+          find media -name '*.jpg' -mtime +7 -delete 2>/dev/null || true

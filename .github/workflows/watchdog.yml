@@ -1,0 +1,23 @@
+name: watchdog
+on:
+  schedule:
+    - cron: "33 */2 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+  issues: write
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m kahwa_publisher.dispatcher watchdog || true
+      - name: Alert
+        if: hashFiles('state/ALERT.txt') != ''
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh issue create --title "Kahwa watchdog $(date -u +%F' '%H:%M)" --body-file state/ALERT.txt || true
+          git config user.name kahwa-bot; git config user.email kahwa-bot@users.noreply.github.com
+          git rm -q state/ALERT.txt && git commit -qm "watchdog alert" && git push -q || true
