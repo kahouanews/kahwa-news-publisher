@@ -105,7 +105,6 @@ def slide_end(source):
     T(d, (W // 2, 860), "قهوة نيوز | العالم كما هو", F("Bold", 50), WHITE, "ma")
     if source:
         T(d, (W // 2, 990), "المصادر: " + source, F("Bold", 40), MUTED, "ma")
-    T(d, (W // 2, 1080), "صيغ بمساعدة الذكاء الاصطناعي اعتماداً على المصادر", F("Regular", 32), MUTED, "ma")
     return im
 
 

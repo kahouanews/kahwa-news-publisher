@@ -409,7 +409,6 @@ def main():
         credit = res["credit"]
         if credit and not credit.startswith("خريطة"):
             d["post"] += f"\nصورة أرشيفية: {credit}"
-        d["post"] += "\nصيغ بمساعدة الذكاء الاصطناعي اعتماداً على المصادر المذكورة، مع تدقيق آلي للحقائق."
         url = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/media/{img.name}"
         post = {"id": sid, "text": d["post"], "media": [{"type": "image", "url": url}], "kind": "post",
                 "title": d.get("headline_full") or d["headline"], "priority": 3 if d.get("urgent") else 5, "sources": c["sources"],
