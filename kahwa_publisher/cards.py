@@ -73,13 +73,13 @@ def fit(d, text, width, start, minimum, max_lines, weight="ExtraBold"):
         size -= 3
 
 
-def draw_rich(d, lines, x_right, y, f, lh, hl, color=WHITE):
+def draw_rich(d, lines, x_right, y, f, lh, hl, color=WHITE, hl_color=None):
     """Right-aligned lines, words found in `hl` painted red."""
     space = d.textlength(" ", font=f)
     for ln in lines:
         x = x_right
         for w in ln.split():
-            T(d, (x, y), w, f, RED if w.strip(PUNCT) in hl else color)
+            T(d, (x, y), w, f, (hl_color or RED) if w.strip(PUNCT) in hl else color)
             x -= tl(d, w, f) + space
         y += lh
     return y
@@ -278,30 +278,32 @@ def overlay(p, photo, out):
     if sub == head:
         sub = ""
     # line 1: red box (the hook), up to 2 lines
-    fb, bl, bs = fit(d, head, maxw - 60, 72, 50, 2)
-    fs, sl, ss = fit(d, sub, maxw, 52, 38, 3, "Bold") if sub else (None, [], 0)
+    fb, bl, bs = fit(d, head, maxw - 60, 76, 68, 2)
+    fs, sl, ss = fit(d, sub, maxw, 54, 44, 3, "Bold") if sub else (None, [], 0)
     blh, slh = int(bs * 1.42), int(ss * 1.42)
-    y = H - 130 - len(sl) * slh - (24 if sl else 0) - len(bl) * blh
+    y = H - 140 - len(sl) * slh - (24 if sl else 0) - len(bl) * blh
     if p.get("card_type") == "breaking":
         T(d, (xr, y - 66), "عاجل", F("ExtraBold", 34), WHITE)
         d.ellipse([xr - tl(d, "عاجل", F("ExtraBold", 34)) - 34, y - 52, xr - tl(d, "عاجل", F("ExtraBold", 34)) - 16, y - 34], fill=RED)
+    urgent = p.get("card_type") == "breaking"
+    box, ink = (RED, WHITE) if urgent else (WHITE, (12, 14, 20))   # red box only for breaking (evidence: red = low trust)
     for ln in bl:
         w = tl(d, ln, fb)
-        d.rectangle([xr - w - 28, y - 4, xr + 14, y + blh - 10], fill=RED)
-        T(d, (xr - 6, y + 4), ln, fb, WHITE)
+        d.rectangle([xr - w - 28, y - 4, xr + 14, y + blh - 10], fill=box)
+        T(d, (xr - 6, y + 4), ln, fb, ink)
         y += blh
     y += 24
-    draw_rich(d, sl, xr, y, fs, slh, set(p.get("hl", ()))) if sl else None
+    draw_rich(d, sl, xr, y, fs, slh, set(p.get("hl", ())), hl_color=(255, 77, 64)) if sl else None
     # brand chip top-right, source + credit bottom
     lw = LAT(34)
     d.text((W - 60 - 112 - d.textlength("KAHWA", font=lw), 74), "KAHWA", font=lw, fill=WHITE, anchor="lm",
            stroke_width=1, stroke_fill=(0, 0, 0))
     d.polygon([(W - 60 - 84, 58), (W - 60, 58), (W - 66, 90), (W - 150, 90)], fill=RED)
     d.text((W - 60 - 75, 74), "NEWS", font=LAT(20), fill=WHITE, anchor="mm")
-    d.line([(60, H - 92), (W - 60, H - 92)], fill=(60, 66, 80), width=2)
-    T(d, (W - 60, H - 56), ("المصدر: " + p["source"]) if p.get("source") else "قهوة نيوز", F("Bold", 24), MUTED)
+    d.line([(60, H - 100), (W - 60, H - 100)], fill=(60, 66, 80), width=2)
+    T(d, (W - 60, H - 56), ("المصدر: " + p["source"]) if p.get("source") else "قهوة نيوز", F("Bold", 30), MUTED)
     now = datetime.now(timezone.utc)
-    T(d, (60, H - 56), f"{now.day} {MONTHS[now.month - 1]} {now.year}", F("Bold", 24), MUTED, "la")
+    T(d, (60, H - 56), f"{now.day} {MONTHS[now.month - 1]} {now.year}", F("Bold", 30), MUTED, "la")
     if credit:
         d.text((60, 74), ("Photo: " + credit)[:60], font=ImageFont.truetype(str(ASSETS / "Almarai-Regular.ttf"), 17),
                fill=(235, 235, 235), anchor="lm", stroke_width=2, stroke_fill=(0, 0, 0))
