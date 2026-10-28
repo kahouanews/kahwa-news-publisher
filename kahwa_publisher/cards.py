@@ -23,10 +23,10 @@ from .card import cover, map_image, wiki_photo, commons_photo, openverse_photo
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 W, H = 1080, 1350
-NAVY0, NAVY1 = (8, 18, 46), (20, 38, 86)
-PANEL, PANEL_LINE = (16, 30, 66), (40, 60, 110)
+NAVY0, NAVY1 = (9, 11, 16), (22, 27, 38)          # palette B: desaturated ink (trust > saturated navy)
+PANEL, PANEL_LINE = (24, 29, 40), (50, 58, 74)
 RED, RED_DARK = (220, 24, 12), (160, 14, 8)
-WHITE, MUTED = (255, 255, 255), (160, 176, 210)
+WHITE, MUTED = (255, 255, 255), (165, 172, 186)
 MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر",
           "نوفمبر", "ديسمبر"]
 PUNCT = "،.:؛!؟\"«»()"
@@ -100,7 +100,7 @@ def background():
     for i, (x0, wdt, a) in enumerate(((-200, 160, 26), (80, 60, 18), (520, 220, 14), (900, 90, 20))):
         sd.polygon([(x0 + 600, 0), (x0 + 600 + wdt, 0), (x0 + wdt, H), (x0, H)], fill=a)
     streak = streak.filter(ImageFilter.GaussianBlur(40))
-    bg = Image.composite(Image.new("RGB", (W, H), (70, 100, 170)), bg, streak)
+    bg = Image.composite(Image.new("RGB", (W, H), (60, 70, 92)), bg, streak)
     return bg
 
 
@@ -260,6 +260,55 @@ def t_facts(c, d, p, photo, mp):
     return credit
 
 
+def overlay(p, photo, out):
+    """Global news style (Sky News Arabia / Al Arabiya / CNN social): full-bleed real photo, dark bottom
+    fade, first headline line in a solid red box, the rest in white beneath; small brand + source."""
+    img, credit = photo
+    c = cover(img, W, H).convert("RGB")
+    fade = Image.new("L", (1, H), 0)
+    for y in range(H):
+        t = max(0.0, (y - H * 0.42) / (H * 0.58))
+        fade.putpixel((0, y), int(250 * min(1, t ** 1.15)))
+    fade = fade.resize((W, H))
+    c = Image.composite(Image.new("RGB", (W, H), (6, 8, 12)), c, fade)
+    d = ImageDraw.Draw(c)
+    xr, maxw = W - 60, W - 120
+    head = (p.get("title") or p["headline"]).strip()
+    sub = (p.get("headline") if p.get("title") else "").strip()
+    if sub == head:
+        sub = ""
+    # line 1: red box (the hook), up to 2 lines
+    fb, bl, bs = fit(d, head, maxw - 60, 72, 50, 2)
+    fs, sl, ss = fit(d, sub, maxw, 52, 38, 3, "Bold") if sub else (None, [], 0)
+    blh, slh = int(bs * 1.42), int(ss * 1.42)
+    y = H - 130 - len(sl) * slh - (24 if sl else 0) - len(bl) * blh
+    if p.get("card_type") == "breaking":
+        T(d, (xr, y - 66), "عاجل", F("ExtraBold", 34), WHITE)
+        d.ellipse([xr - tl(d, "عاجل", F("ExtraBold", 34)) - 34, y - 52, xr - tl(d, "عاجل", F("ExtraBold", 34)) - 16, y - 34], fill=RED)
+    for ln in bl:
+        w = tl(d, ln, fb)
+        d.rectangle([xr - w - 28, y - 4, xr + 14, y + blh - 10], fill=RED)
+        T(d, (xr - 6, y + 4), ln, fb, WHITE)
+        y += blh
+    y += 24
+    draw_rich(d, sl, xr, y, fs, slh, set(p.get("hl", ()))) if sl else None
+    # brand chip top-right, source + credit bottom
+    lw = LAT(34)
+    d.text((W - 60 - 112 - d.textlength("KAHWA", font=lw), 74), "KAHWA", font=lw, fill=WHITE, anchor="lm",
+           stroke_width=1, stroke_fill=(0, 0, 0))
+    d.polygon([(W - 60 - 84, 58), (W - 60, 58), (W - 66, 90), (W - 150, 90)], fill=RED)
+    d.text((W - 60 - 75, 74), "NEWS", font=LAT(20), fill=WHITE, anchor="mm")
+    d.line([(60, H - 92), (W - 60, H - 92)], fill=(60, 66, 80), width=2)
+    T(d, (W - 60, H - 56), ("المصدر: " + p["source"]) if p.get("source") else "قهوة نيوز", F("Bold", 24), MUTED)
+    now = datetime.now(timezone.utc)
+    T(d, (60, H - 56), f"{now.day} {MONTHS[now.month - 1]} {now.year}", F("Bold", 24), MUTED, "la")
+    if credit:
+        d.text((60, 74), ("Photo: " + credit)[:60], font=ImageFont.truetype(str(ASSETS / "Almarai-Regular.ttf"), 17),
+               fill=(235, 235, 235), anchor="lm", stroke_width=2, stroke_fill=(0, 0, 0))
+    c.save(out, "JPEG", quality=93, optimize=True, progressive=True)
+    return credit
+
+
 TEMPLATES = {"photo": t_photo, "breaking": t_breaking, "quote": t_quote, "numbers": t_numbers,
              "facts": t_facts, "map": t_photo}
 
@@ -276,6 +325,8 @@ def render_card(p, out):
         ctype = "photo"
     p = dict(p, hl=[w.strip(PUNCT) for w in (p.get("highlight") or "").split()])
     photo = None if ctype == "map" else find_photo(p.get("entity"), p.get("photo_query"))
+    if photo and ctype in ("photo", "breaking"):
+        return {"card_type": ctype, "style": "overlay", "credit": overlay(p, photo, out)}
     mp = None if photo else map_image(p.get("country_en"))
     c = background()
     d = ImageDraw.Draw(c)
