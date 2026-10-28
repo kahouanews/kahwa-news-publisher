@@ -113,7 +113,7 @@ def is_seen(seen, c):
     for s in seen["stories"]:
         st = set(s["tok"])
         inter = len(st & c["tok"])
-        if inter >= 3 and inter / max(1, min(len(st), len(c["tok"]))) >= 0.35:
+        if inter >= 3 and inter / max(1, min(len(st), len(c["tok"]))) >= 0.2:
             return True
     return False
 
@@ -180,6 +180,7 @@ def llm(prompt):
 
 CHECK = """أنت مدقق حقائق صارم في وكالة أنباء دولية. قارن كل جملة في المنشور بالمصادر.
 ابحث عن: أي معلومة غير موجودة في المصادر، رقم أو اسم خاطئ، جملة مبهمة أو تغيّر المعنى، مبالغة أو رأي، ركاكة لغوية.
+إذا صححت، حافظ على نفس البنية تماماً (السطر الأول بـ 🔴 أو 🟡، "لماذا يهم؟"، سؤال النقاش، الوسوم، "المصادر:") وبصياغة أصلية لا تنسخ جمل المصادر.
 أعد JSON فقط: {"ok": true/false, "problems": ["..."], "corrected_post": "المنشور بعد التصحيح بنفس البنية إن لزم", "corrected_headline": "العنوان بعد التصحيح إن لزم"}"""
 
 
@@ -191,12 +192,6 @@ def write_post(c):
     post = re.sub(r"https?://\S+|www\.\S+", "", d.get("post", "")).strip()
     if not d.get("safe", False) or len(post) < 120 or any(b in post for b in BLOCK[:8]):
         return None
-    # originality guard: reject if any 8-word run is copied from a source
-    srcw = norm(src).split()
-    grams = {" ".join(srcw[i:i + 8]) for i in range(len(srcw) - 7)}
-    pw = norm(post).split()
-    if any(" ".join(pw[i:i + 8]) in grams for i in range(len(pw) - 7)):
-        return None
     # fact-check pass: a second, independent read compares every claim with the sources
     chk = llm(CHECK + "\n\nالمصادر:\n" + src + "\n\nالمنشور:\n" + post)
     chk = json.loads(chk[chk.find("{"): chk.rfind("}") + 1])
@@ -207,6 +202,14 @@ def write_post(c):
         post = re.sub(r"https?://\S+|www\.\S+", "", fixed)
         if chk.get("corrected_headline"):
             d["headline"] = chk["corrected_headline"][:80]
+    # originality guard (after any correction): reject if any 7-word run is copied from a source
+    srcw = norm(src).split()
+    grams = {" ".join(srcw[i:i + 7]) for i in range(len(srcw) - 6)}
+    pw = norm(post).split()
+    if any(" ".join(pw[i:i + 7]) in grams for i in range(len(pw) - 6)):
+        return None
+    if not post.lstrip().startswith(("🔴", "🟡")) or "المصادر" not in post or "لماذا يهم" not in post:
+        return None
     d["post"] = post
     return d
 
