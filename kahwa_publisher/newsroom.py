@@ -56,8 +56,22 @@ def norm(t):
     return re.sub(r"[^\w\s]", " ", t)
 
 
+def stem(w):
+    for pre in ("وال", "بال", "لل", "فال", "كال", "ال"):
+        if w.startswith(pre) and len(w) - len(pre) >= 3:
+            w = w[len(pre):]
+            break
+    if w[:1] in "وب" and len(w) >= 5:
+        w = w[1:]
+    for suf in ("ات", "ون", "ين", "يه", "ه"):
+        if w.endswith(suf) and len(w) - len(suf) >= 3:
+            w = w[: -len(suf)]
+            break
+    return w
+
+
 def tokens(t):
-    return {w for w in norm(t).split() if len(w) > 2 and w not in STOP}
+    return {stem(w) for w in norm(t).split() if len(w) > 2 and w not in STOP}
 
 
 def fetch():
@@ -85,7 +99,7 @@ def cluster(items):
     for it in sorted(items, key=lambda x: x["age_h"]):
         for c in clusters:
             inter = len(it["tok"] & c["tok"])
-            if inter >= 3 and inter / max(1, min(len(it["tok"]), len(c["tok"]))) >= 0.3:
+            if inter >= 3 and inter / max(1, min(len(it["tok"]), len(c["tok"]))) >= 0.22:
                 c["items"].append(it)
                 c["tok"] |= it["tok"]
                 break
@@ -102,7 +116,9 @@ def cluster(items):
 
 def blocked(c):
     text = " ".join(i["title"] + " " + i["summary"] for i in c["items"])
-    return any(b in text for b in BLOCK) or sum(k in text for k in SPORTS) >= 2
+    words = set(norm(text).split())
+    sport_hits = sum((k in text) if " " in k else (norm(k) in words) for k in SPORTS)
+    return any(b in text for b in BLOCK) or sport_hits >= 2
 
 
 def load_seen():
@@ -196,7 +212,9 @@ def write_post(c):
     raw = raw[raw.find("{"): raw.rfind("}") + 1]
     d = json.loads(raw)
     post = re.sub(r"https?://\S+|www\.\S+", "", d.get("post", "")).strip()
-    if (d.get("category") or "").strip() in ("رياضة", "رياضي", "رياضية") or sum(k in post for k in SPORTS) >= 2:
+    pwords = set(norm(post).split())
+    if (d.get("category") or "").strip() in ("رياضة", "رياضي", "رياضية") or \
+            sum((k in post) if " " in k else (norm(k) in pwords) for k in SPORTS) >= 2:
         print(json.dumps({"qa_reason": "sports"}))
         return None
     if not d.get("safe", False) or len(post) < 120 or any(b in post for b in BLOCK[:8]):
@@ -311,7 +329,10 @@ def main():
     for c in clusters:
         if made >= x.max or tried >= int(os.getenv("MAX_TRIES", "5")):
             break
-        if len(c["sources"]) < int(os.getenv("MIN_SOURCES", "2")) or blocked(c) or is_seen(seen, c):
+        tier1 = {"BBC عربي", "فرانس 24", "DW عربية", "أخبار الأمم المتحدة"}
+        multi = len(c["sources"]) >= int(os.getenv("MIN_SOURCES", "2"))
+        trusted_single = c["sources"][0] in tier1 and c["score"] >= 8   # fresh story from a tier-1 outlet
+        if not (multi or trusted_single) or blocked(c) or is_seen(seen, c):
             continue
         tried += 1
         try:
