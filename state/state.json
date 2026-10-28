@@ -1,0 +1,14 @@
+{
+ "providers": {},
+ "global_pause_until": null,
+ "next_allowed_at": null,
+ "last_published_at": null,
+ "published": [],
+ "log": [
+  {
+   "t": "2026-10-28T16:09:18+00:00",
+   "msg": "publishing disabled (kill switch: state/PAUSE or repo variable PUBLISHING_ENABLED!=true)"
+  }
+ ],
+ "alerts": []
+}
