@@ -123,6 +123,7 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 اكتب منشور فيسبوك أصلياً بالعربية الفصحى المبسطة عن الخبر التالي، اعتماداً فقط على الوقائع الواردة في المصادر أدناه.
 قواعد صارمة:
 - لا تنسخ أي جملة من المصادر؛ أعد الصياغة كلياً وادمج المعلومات من كل المصادر.
+- الدقة أولاً: كل جملة يجب أن تكون واضحة المعنى ومطابقة لما في المصادر حرفياً من حيث الوقائع.
 - لا تخترع أي رقم أو اسم أو تصريح غير موجود في المصادر. إذا كانت المعلومات غير مؤكدة قل "بحسب التقارير".
 - حياد تام، بلا رأي، بلا سخرية، بلا تحريض، بلا روابط، بلا ذكر للجزائر.
 - البنية: سطر أول جذاب يبدأ بـ 🔴 (أو 🟡 إن لم يكن عاجلاً)، ثم 3 إلى 5 أسطر قصيرة بالتفاصيل الأهم، ثم سطر "لماذا يهم؟" بجملة واحدة، ثم سؤال قصير يدعو للنقاش، ثم 3 وسوم عربية.
@@ -140,7 +141,8 @@ def llm(prompt):
     errs = []
     gk = os.getenv("GEMINI_API_KEY")
     if gk:
-        for model in os.getenv("GEMINI_MODELS", "gemini-flash-latest,gemini-flash-lite-latest").split(","):
+        for model in os.getenv("GEMINI_MODELS", "gemini-flash-latest,gemini-2.5-flash,gemini-flash-lite-latest").split(","):
+          for attempt in range(3):
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
                 body = {"contents": [{"parts": [{"text": prompt}]}],
@@ -150,7 +152,11 @@ def llm(prompt):
                 r = json.loads(urllib.request.urlopen(req, timeout=90).read())
                 return r["candidates"][0]["content"]["parts"][0]["text"]
             except Exception as ex:
-                errs.append(f"gemini/{model}: {str(ex)[:120]}")
+                errs.append(f"gemini/{model}#{attempt}: {str(ex)[:100]}")
+                if any(c in str(ex) for c in ("503", "429", "500", "timed out")):
+                    time.sleep(8 * (attempt + 1))
+                    continue
+                break
     for name, base, key_env, model_env, default in [
         ("groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "llama-3.3-70b-versatile"),
         ("openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "OPENROUTER_MODEL",
@@ -172,6 +178,11 @@ def llm(prompt):
     raise RuntimeError("all LLMs failed: " + " | ".join(errs) if errs else "no LLM key configured")
 
 
+CHECK = """أنت مدقق حقائق صارم في وكالة أنباء دولية. قارن كل جملة في المنشور بالمصادر.
+ابحث عن: أي معلومة غير موجودة في المصادر، رقم أو اسم خاطئ، جملة مبهمة أو تغيّر المعنى، مبالغة أو رأي، ركاكة لغوية.
+أعد JSON فقط: {"ok": true/false, "problems": ["..."], "corrected_post": "المنشور بعد التصحيح بنفس البنية إن لزم", "corrected_headline": "العنوان بعد التصحيح إن لزم"}"""
+
+
 def write_post(c):
     src = "\n".join(f"- [{i['src']}] {i['title']} — {i['summary'][:400]}" for i in c["items"][:6])
     raw = llm(PROMPT + src)
@@ -186,6 +197,16 @@ def write_post(c):
     pw = norm(post).split()
     if any(" ".join(pw[i:i + 8]) in grams for i in range(len(pw) - 7)):
         return None
+    # fact-check pass: a second, independent read compares every claim with the sources
+    chk = llm(CHECK + "\n\nالمصادر:\n" + src + "\n\nالمنشور:\n" + post)
+    chk = json.loads(chk[chk.find("{"): chk.rfind("}") + 1])
+    if not chk.get("ok"):
+        fixed = (chk.get("corrected_post") or "").strip()
+        if len(fixed) < 120:
+            return None
+        post = re.sub(r"https?://\S+|www\.\S+", "", fixed)
+        if chk.get("corrected_headline"):
+            d["headline"] = chk["corrected_headline"][:80]
     d["post"] = post
     return d
 
