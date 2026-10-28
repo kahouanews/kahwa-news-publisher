@@ -60,6 +60,7 @@ MEDIA = ROOT / "media"
 ASSETS = ROOT / "assets"
 REPO = os.getenv("GITHUB_REPOSITORY", "kahouanews/kahwa-news-publisher")
 BRANCH = os.getenv("GITHUB_REF_NAME", "main")
+REEL_HOURS_UTC = {int(h) for h in os.getenv("REEL_HOURS_UTC", "11,17").split(",") if h}
 
 
 # ---------------------------------------------------------------- fetch & cluster
@@ -164,6 +165,14 @@ def is_seen(seen, c):
     return False
 
 
+# Meta engagement-bait policy: asking for reactions/comments/shares/votes demotes the post and the Page
+BAIT = re.compile(r"(?<!\w)(شاركوا|انشروا|علّقوا|علقوا|اكتبوا|صوّتوا|صوتوا|تابعونا|اضغط|اضغطوا|لايك|منشن|شارك المنشور|شارك الخبر|"
+                  r"في التعليقات|اكتب رأيك في|تابع الصفحة|تابع قهوة)(?!\w)")
+# Meta: imagery of war/violence is never recommended -> such stories get our own visual (map/numbers/facts), no photo
+VIOLENT = ["قصف", "غارة", "غارات", "انفجار", "تفجير", "هجوم", "قتلى", "قتيل", "مقتل", "جرحى", "اشتباكات", "معارك",
+           "صاروخ", "صواريخ", "مسيّرة", "مسيرة", "مجزرة", "إطلاق نار", "اغتيال", "حرب", "دمار", "جثث", "ضحايا"]
+
+
 # ---------------------------------------------------------------- AI writer (free LLM failover)
 PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسمها "قهوة نيوز Kahwa News".
 اكتب منشور فيسبوك أصلياً بالعربية الفصحى المبسطة عن الخبر التالي، اعتماداً فقط على الوقائع الواردة في المصادر أدناه.
@@ -177,8 +186,12 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 - بعده سطران أو ثلاثة قصيرة جداً بالتفاصيل الأهم فقط (المنشور كله بين 250 و550 حرفاً).
 - ثم وسم أو وسمان عربيان كحد أقصى في سطر واحد.
 - اذكر في سطر أخير: "المصادر: " ثم أسماء المؤسسات فقط بدون روابط.
+- ممنوع منعاً باتاً طلب التفاعل: لا "شارك" ولا "علّق" ولا "اضغط لايك" ولا "تابعونا" ولا "صوّت". يُسمح نادراً بسؤال رأي محايد واحد في النهاية.
+- لغة محايدة: افصل الوقائع عن التصريحات ("قال"، "بحسب")، بلا تهويل ولا صفات انفعالية.
+- قيمة مضافة (قاعدة الأصالة في فيسبوك): أجب ضمنياً عن "لماذا يهم هذا؟" أو "ماذا بعد؟" بجملة واحدة مستندة إلى المصادر.
 أعد JSON فقط بهذا الشكل:
-{"headline": "عنوان للصورة لا يتجاوز 70 حرفاً", "highlight": "كلمتان أو ثلاث من العنوان نفسه حرفياً هي الأهم", "category": "كلمة واحدة: سياسة/اقتصاد/علوم/صحة/تكنولوجيا/بيئة/دبلوماسية/دولي", "urgent": true/false, "entity": "عنوان مقالة ويكيبيديا الإنجليزية للشخص أو المكان أو المؤسسة الأبرز في الخبر بالضبط (مثال: Emmanuel Macron)", "photo_query": "2-4 English words to find a relevant real photo", "country_en": "English name of the main country", "post": "نص المنشور كاملاً", "safe": true/false, "card_type": "اختر الأنسب: breaking (خبر عاجل حقيقي) / quote (إذا كان جوهر الخبر تصريحاً منقولاً حرفياً عن شخص مسمى) / numbers (إذا احتوت المصادر على 2-4 أرقام مهمة) / facts (خبر معقد يُشرح في 3-4 نقاط) / photo (الباقي)", "kicker": "كلمة أو كلمتان فوق العنوان: اسم البلد أو الملف (مثال: أوكرانيا، الاقتصاد العالمي)", "title": "عنوان قصير جداً للبطاقة لا يتجاوز 28 حرفاً", "quote": "للتصريح فقط: نص الاقتباس كما ورد في المصادر حرفياً، أقل من 110 حرفاً", "speaker": "اسم صاحب التصريح بالعربية", "role": "صفته", "numbers": [{"value": "رقم كما ورد في المصادر", "label": "ماذا يعني، 2-4 كلمات"}], "facts": ["نقطة قصيرة أقل من 70 حرفاً"]}
+{"headline": "عنوان للصورة لا يتجاوز 70 حرفاً", "highlight": "كلمتان أو ثلاث من العنوان نفسه حرفياً هي الأهم", "category": "كلمة واحدة: سياسة/اقتصاد/علوم/صحة/تكنولوجيا/بيئة/دبلوماسية/دولي", "urgent": true/false, "entity": "عنوان مقالة ويكيبيديا الإنجليزية للشخص أو المكان أو المؤسسة الأبرز في الخبر بالضبط (مثال: Emmanuel Macron)", "photo_query": "2-4 English words to find a relevant real photo", "country_en": "English name of the main country", "post": "نص المنشور كاملاً", "safe": true/false, "card_type": "اختر الأنسب: breaking (خبر عاجل حقيقي) / quote (إذا كان جوهر الخبر تصريحاً منقولاً حرفياً عن شخص مسمى) / numbers (إذا احتوت المصادر على 2-4 أرقام مهمة) / facts (خبر معقد يُشرح في 3-4 نقاط) / photo (الباقي)", "kicker": "كلمة أو كلمتان فوق العنوان: اسم البلد أو الملف (مثال: أوكرانيا، الاقتصاد العالمي)", "title": "عنوان قصير جداً للبطاقة لا يتجاوز 28 حرفاً (الخطّاف)", "subline": "سطر تحت العنوان في البطاقة 50-110 حرفاً يضيف معلومتين جديدتين على الأقل غير موجودتين في العنوان (رقم، مكان، نتيجة، موعد) من المصادر حرفياً", "quote": "للتصريح فقط: نص الاقتباس كما ورد في المصادر حرفياً، أقل من 110 حرفاً", "speaker": "اسم صاحب التصريح بالعربية", "role": "صفته", "numbers": [{"value": "رقم كما ورد في المصادر", "label": "ماذا يعني، 2-4 كلمات"}], "facts": ["نقطة قصيرة أقل من 70 حرفاً"]}
+فضّل numbers أو facts كلما سمحت المصادر بذلك (بطاقات من تصميمنا تشرح الخبر)، فهي أصلية أكثر من صورة مع عنوان.
 البطاقة يجب أن تكون صحيحة 100%: كل رقم واقتباس فيها موجود حرفياً في المصادر، وإلا اختر photo.
 اجعل "safe" = false إذا كان الخبر رياضياً أو يذكر المغرب أو الإمارات أو الجزائر أو إسرائيل أو عن الدين أو يتضمن عنفاً مصوراً أو معلومات لا يمكن التحقق منها.
 
@@ -246,7 +259,7 @@ def write_post(c):
         print(json.dumps({"qa_reason": "sports"}))
         return None
     if not d.get("safe", False) or len(post) < 120 or any(b in post for b in BLOCK) or \
-            banned_country(post + " " + " ".join(json.dumps(d.get(k, ""), ensure_ascii=False) for k in ("entity", "photo_query", "country_en", "highlight", "title", "kicker", "quote", "speaker", "role", "numbers", "facts"))):
+            banned_country(post + " " + " ".join(json.dumps(d.get(k, ""), ensure_ascii=False) for k in ("entity", "photo_query", "country_en", "highlight", "title", "subline", "kicker", "quote", "speaker", "role", "numbers", "facts"))):
         print(json.dumps({"qa_reason": "unsafe/short"}))
         return None
     # fact-check pass: a second, independent read compares every claim with the sources
@@ -267,10 +280,22 @@ def write_post(c):
     if any(" ".join(pw[i:i + 7]) in grams for i in range(len(pw) - 6)):
         print(json.dumps({"qa_reason": "copied 7-gram"}))
         return None
+    body = post.split("المصادر")[0]
+    if BAIT.search(body):
+        print(json.dumps({"qa_reason": "engagement bait"}))
+        return None
     if "المصادر" not in post or re.search("[\U0001F300-\U0001FAFF\u2600-\u27BF]", post) or len(post) > 900:
         print(json.dumps({"qa_reason": "structure"}))
         return None
     d["post"] = post
+    blob = post + " " + (d.get("headline") or "") + " " + (d.get("title") or "")
+    d["no_photo"] = sum(w in blob for w in VIOLENT) >= 1
+    sub = d.get("subline") or ""
+    if any(n not in src for n in re.findall(r"\d[\d.,]*", sub)) or BAIT.search(sub):
+        sub = ""                                    # every figure on the card must exist in the sources
+    d["subline"] = sub
+    if sub:
+        d["headline_full"], d["headline"] = d.get("headline"), d["subline"][:120]
     return d
 
 
@@ -384,9 +409,10 @@ def main():
         credit = res["credit"]
         if credit and not credit.startswith("خريطة"):
             d["post"] += f"\nصورة أرشيفية: {credit}"
+        d["post"] += "\nصيغ بمساعدة الذكاء الاصطناعي اعتماداً على المصادر المذكورة، مع تدقيق آلي للحقائق."
         url = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/media/{img.name}"
         post = {"id": sid, "text": d["post"], "media": [{"type": "image", "url": url}], "kind": "post",
-                "title": d["headline"], "priority": 3 if d.get("urgent") else 5, "sources": c["sources"],
+                "title": d.get("headline_full") or d["headline"], "priority": 3 if d.get("urgent") else 5, "sources": c["sources"],
                 "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
                 # give GitHub time to serve the pushed image before any provider fetches it
                 "not_before": datetime.fromtimestamp(time.time() + 900, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")}
@@ -396,6 +422,22 @@ def main():
             QUEUE.mkdir(exist_ok=True)
             (QUEUE / f"{sid}.json").write_text(json.dumps(post, ensure_ascii=False, indent=1))
         made += 1
+        # one silent explainer reel at ~12:00 and ~18:00 Algeria (research: reels for non-follower reach, no AI voice)
+        if made == 1 and datetime.now(timezone.utc).hour in REEL_HOURS_UTC and not x.dry:
+            try:
+                from .reel import render_reel
+                from .cards import find_photo
+                vid = MEDIA / f"{sid}-reel.mp4"
+                ph = None if d.get("no_photo") else find_photo(d.get("entity"), d.get("photo_query"))
+                secs = render_reel(d, ph, "، ".join(c["sources"][:3]), vid)
+                if secs:
+                    rp = dict(post, id=sid + "-reel", kind="reel", priority=6,
+                              media=[{"type": "video", "url": url.replace(img.name, vid.name)}],
+                              not_before=datetime.fromtimestamp(time.time() + 3600, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"))
+                    (QUEUE / f"{sid}-reel.json").write_text(json.dumps(rp, ensure_ascii=False, indent=1))
+                    print(json.dumps({"reel": vid.name, "seconds": secs}))
+            except Exception as ex:
+                print(json.dumps({"reel_error": str(ex)[:300]}))
     SEEN.parent.mkdir(exist_ok=True)
     SEEN.write_text(json.dumps(seen, ensure_ascii=False))
     print(json.dumps({"clusters": len(clusters), "queued_now": made}))

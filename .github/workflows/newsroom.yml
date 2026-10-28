@@ -33,4 +33,4 @@ jobs:
           for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
       - name: Clean old cards (keep 7 days)
         run: |
-          find media -name '*.jpg' -mtime +7 -delete 2>/dev/null || true
+          find media \( -name '*.jpg' -o -name '*.mp4' \) -mtime +7 -delete 2>/dev/null || true

@@ -326,7 +326,10 @@ def render_card(p, out):
     if ctype == "facts" and len(p.get("facts") or []) < 3:
         ctype = "photo"
     p = dict(p, hl=[w.strip(PUNCT) for w in (p.get("highlight") or "").split()])
-    photo = None if ctype == "map" else find_photo(p.get("entity"), p.get("photo_query"))
+    if p.get("no_photo"):                       # war/violence: Meta never recommends such imagery -> own visual
+        if ctype in ("photo", "breaking", "quote"):
+            ctype = "facts" if len(p.get("facts") or []) >= 3 else ("numbers" if len(p.get("numbers") or []) >= 2 else "map")
+    photo = None if ctype == "map" or p.get("no_photo") else find_photo(p.get("entity"), p.get("photo_query"))
     if photo and ctype in ("photo", "breaking"):
         return {"card_type": ctype, "style": "overlay", "credit": overlay(p, photo, out)}
     mp = None if photo else map_image(p.get("country_en"))

@@ -23,14 +23,15 @@ DONE = ROOT / "queue" / "done"
 FAILED = ROOT / "queue" / "failed"
 STATE = ROOT / "state" / "state.json"
 
-MIN_GAP_MIN = int(os.getenv("MIN_GAP_MINUTES", "40"))
-JITTER_MIN = int(os.getenv("JITTER_MINUTES", "20"))
-DAILY_CAP = int(os.getenv("DAILY_CAP", "8"))  # new Page: ramp slowly
-REEL_DAILY_CAP = int(os.getenv("REEL_DAILY_CAP", "3"))
+MIN_GAP_MIN = int(os.getenv("MIN_GAP_MINUTES", "75"))   # research 2026-10-28: 75-90 min spacing
+JITTER_MIN = int(os.getenv("JITTER_MINUTES", "15"))
+DAILY_CAP = min(10, int(os.getenv("DAILY_CAP", "10")))  # hard ceiling 10/day
+RAMP_CAP, RAMP_DAYS = int(os.getenv("RAMP_CAP", "6")), int(os.getenv("RAMP_DAYS", "14"))  # weeks 1-2: <=6/day
+REEL_DAILY_CAP = int(os.getenv("REEL_DAILY_CAP", "2"))
 FB_BLOCK_PAUSE_H = int(os.getenv("FB_BLOCK_PAUSE_HOURS", "48"))
 AUTH_COOLDOWN_H = int(os.getenv("AUTH_COOLDOWN_HOURS", "12"))
 TRANSIENT_COOLDOWN_MIN = int(os.getenv("TRANSIENT_COOLDOWN_MINUTES", "30"))
-QUIET_HOURS = os.getenv("QUIET_HOURS_UTC", "0-5")  # no posts 00:00-05:59 UTC (01-06 Algeria)
+QUIET_HOURS = os.getenv("QUIET_HOURS_UTC", "00:30-06:00")  # no posts 01:30-07:00 Algeria (UTC+1)
 MAX_ATTEMPTS = int(os.getenv("MAX_ATTEMPTS", "8"))
 
 
@@ -75,8 +76,20 @@ def alert(st, msg):
 
 
 def in_quiet_hours(t):
-    a, b = (int(x) for x in QUIET_HOURS.split("-"))
-    return a <= t.hour <= b
+    def m(x):
+        h, _, mi = x.partition(":")
+        return int(h) * 60 + int(mi or 0)
+    a, b = (m(x) for x in QUIET_HOURS.split("-"))
+    cur = t.hour * 60 + t.minute
+    return a <= cur < b if a <= b else (cur >= a or cur < b)
+
+
+def cap_for(st, t):
+    """Young Page ramp: RAMP_CAP/day for the first RAMP_DAYS after the first publish, then DAILY_CAP."""
+    first = parse(st["published"][0]["t"]) if st.get("published") else None
+    if not first or t - first < timedelta(days=RAMP_DAYS):
+        return min(RAMP_CAP, DAILY_CAP)
+    return DAILY_CAP
 
 
 def todays_counts(st, t):
@@ -198,7 +211,7 @@ def run():
         save_state(st)
         return 0
     total, reels = todays_counts(st, t)
-    if total >= DAILY_CAP:
+    if total >= cap_for(st, t):
         save_state(st)
         return 0
     queue = [(f, p) for f, p in due_posts() if not p.get("uncertain")]
