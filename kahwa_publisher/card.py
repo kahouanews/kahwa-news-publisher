@@ -88,7 +88,7 @@ def wiki_photo(entity):
         src = (s.get("originalimage") or {}).get("source")
         if not src or s.get("type") == "disambiguation":
             return None
-        fname = urllib.parse.unquote(src.split("/")[-1])
+        fname = urllib.parse.unquote(src.split("?")[0].split("/")[-1])
         meta = json.loads(_get("https://commons.wikimedia.org/w/api.php?action=query&format=json&formatversion=2"
                                f"&titles=File:{urllib.parse.quote(fname)}&prop=imageinfo&iiprop=url|size|mime|extmetadata"
                                "&iiurlwidth=1600&iiextmetadatafilter=LicenseShortName|Artist"))

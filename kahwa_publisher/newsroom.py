@@ -178,7 +178,8 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 - ثم وسم أو وسمان عربيان كحد أقصى في سطر واحد.
 - اذكر في سطر أخير: "المصادر: " ثم أسماء المؤسسات فقط بدون روابط.
 أعد JSON فقط بهذا الشكل:
-{"headline": "عنوان للصورة لا يتجاوز 70 حرفاً", "highlight": "كلمتان أو ثلاث من العنوان نفسه حرفياً هي الأهم", "category": "كلمة واحدة: سياسة/اقتصاد/علوم/صحة/تكنولوجيا/بيئة/دبلوماسية/دولي", "urgent": true/false, "entity": "عنوان مقالة ويكيبيديا الإنجليزية للشخص أو المكان أو المؤسسة الأبرز في الخبر بالضبط (مثال: Emmanuel Macron)", "photo_query": "2-4 English words to find a relevant real photo", "country_en": "English name of the main country", "post": "نص المنشور كاملاً", "safe": true/false}
+{"headline": "عنوان للصورة لا يتجاوز 70 حرفاً", "highlight": "كلمتان أو ثلاث من العنوان نفسه حرفياً هي الأهم", "category": "كلمة واحدة: سياسة/اقتصاد/علوم/صحة/تكنولوجيا/بيئة/دبلوماسية/دولي", "urgent": true/false, "entity": "عنوان مقالة ويكيبيديا الإنجليزية للشخص أو المكان أو المؤسسة الأبرز في الخبر بالضبط (مثال: Emmanuel Macron)", "photo_query": "2-4 English words to find a relevant real photo", "country_en": "English name of the main country", "post": "نص المنشور كاملاً", "safe": true/false, "card_type": "اختر الأنسب: breaking (خبر عاجل حقيقي) / quote (إذا كان جوهر الخبر تصريحاً منقولاً حرفياً عن شخص مسمى) / numbers (إذا احتوت المصادر على 2-4 أرقام مهمة) / facts (خبر معقد يُشرح في 3-4 نقاط) / photo (الباقي)", "kicker": "كلمة أو كلمتان فوق العنوان: اسم البلد أو الملف (مثال: أوكرانيا، الاقتصاد العالمي)", "title": "عنوان قصير جداً للبطاقة لا يتجاوز 28 حرفاً", "quote": "للتصريح فقط: نص الاقتباس كما ورد في المصادر حرفياً، أقل من 110 حرفاً", "speaker": "اسم صاحب التصريح بالعربية", "role": "صفته", "numbers": [{"value": "رقم كما ورد في المصادر", "label": "ماذا يعني، 2-4 كلمات"}], "facts": ["نقطة قصيرة أقل من 70 حرفاً"]}
+البطاقة يجب أن تكون صحيحة 100%: كل رقم واقتباس فيها موجود حرفياً في المصادر، وإلا اختر photo.
 اجعل "safe" = false إذا كان الخبر رياضياً أو يذكر المغرب أو الإمارات أو الجزائر أو إسرائيل أو عن الدين أو يتضمن عنفاً مصوراً أو معلومات لا يمكن التحقق منها.
 
 المصادر:
@@ -245,7 +246,7 @@ def write_post(c):
         print(json.dumps({"qa_reason": "sports"}))
         return None
     if not d.get("safe", False) or len(post) < 120 or any(b in post for b in BLOCK) or \
-            banned_country(post + " " + " ".join(str(d.get(k, "")) for k in ("entity", "photo_query", "country_en", "highlight"))):
+            banned_country(post + " " + " ".join(json.dumps(d.get(k, ""), ensure_ascii=False) for k in ("entity", "photo_query", "country_en", "highlight", "title", "kicker", "quote", "speaker", "role", "numbers", "facts"))):
         print(json.dumps({"qa_reason": "unsafe/short"}))
         return None
     # fact-check pass: a second, independent read compares every claim with the sources
@@ -375,11 +376,14 @@ def main():
         sid = datetime.now(timezone.utc).strftime("%Y%m%d%H%M") + "-" + c["key"]
         MEDIA.mkdir(exist_ok=True)
         img = MEDIA / f"{sid}.jpg"
-        from .card import render
-        credit = render(d["headline"], d.get("category"), d.get("urgent"), img, d.get("photo_query"),
-                        d.get("country_en"), d.get("highlight", ""), d.get("entity"))
+        from .cards import render_card
+        ct = d.get("card_type") or "photo"
+        if d.get("urgent") and ct == "photo":
+            ct = "breaking"
+        res = render_card(dict(d, card_type=ct, source="، ".join(c["sources"][:3])), img)
+        credit = res["credit"]
         if credit and not credit.startswith("خريطة"):
-            d["post"] += f"\n📷 {credit} (Wikimedia Commons)"
+            d["post"] += f"\nصورة أرشيفية: {credit}"
         url = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/media/{img.name}"
         post = {"id": sid, "text": d["post"], "media": [{"type": "image", "url": url}], "kind": "post",
                 "title": d["headline"], "priority": 3 if d.get("urgent") else 5, "sources": c["sources"],
