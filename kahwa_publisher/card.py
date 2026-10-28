@@ -125,10 +125,14 @@ def map_image(country_en):
         return [poly[0] for poly in g["coordinates"]]
 
     tr = rings(target["geometry"])
-    xs = [x for r in tr for x, _ in r]
-    ys = [y for r in tr for _, y in r]
+    if max(x for r in tr for x, _ in r) - min(x for r in tr for x, _ in r) > 180:   # crosses antimeridian (Russia, Fiji...)
+        tr = [[(x + 360 if x < 0 else x, y) for x, y in r] for r in tr]
+    main = max(tr, key=len)                                       # frame on the mainland, not far islands
+    xs = [x for x, _ in main]
+    ys = [y for _, y in main]
     cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
-    span = max(max(xs) - min(xs), (max(ys) - min(ys)) * W / PH, 12) * 2.6
+    base = max(max(xs) - min(xs), (max(ys) - min(ys)) * W / PH, 12)
+    span = base * (2.6 if base < 40 else 1.8 if base < 90 else 1.35)
     x0, x1 = cx - span / 2, cx + span / 2
     yspan = span * PH / W
     y0, y1 = cy - yspan / 2, cy + yspan / 2
@@ -145,7 +149,8 @@ def map_image(country_en):
 
     for f in geo["features"]:
         for r in rings(f["geometry"]):
-            d.polygon(P(r), fill=(32, 46, 72), outline=(60, 78, 110))
+            for off in (0, 360, -360):
+                d.polygon(P([(x + off, y) for x, y in r]), fill=(32, 46, 72), outline=(60, 78, 110))
     for r in tr:
         d.polygon(P(r), fill=RED, outline=(255, 120, 100))
     px, py = (cx - x0) / (x1 - x0) * W * S, (y1 - cy) / (y1 - y0) * PH * S
