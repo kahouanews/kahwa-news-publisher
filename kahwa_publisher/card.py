@@ -1,0 +1,282 @@
+"""Kahwa News card v2 — photo-led, benchmarked on global news social cards.
+
+Layout (1080x1350, 4:5 = max feed real estate on Facebook/Instagram):
+  * top ~60%: real, legally reusable photo (Wikimedia Commons, free licences only, credited)
+    with a cinematic grade and a navy fade into the text panel; fallback = vector map of the
+    country with the country highlighted in brand red; last fallback = brand pattern.
+  * small vector brand badge top-left, red label (عاجل / category) on the seam.
+  * headline: 2-4 lines, right-aligned, bottom-placed (not huge, not centred — research shows
+    oversized centred overlays lower engagement), key phrase highlighted in red.
+  * footer: KAHWA NEWS wordmark, date, photo credit + licence.
+"""
+import io
+import json
+import re
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+
+ASSETS = Path(__file__).resolve().parent.parent / "assets"
+UA = {"User-Agent": "KahwaNewsBot/1.0 (https://github.com/kahouanews/kahwa-news-publisher; momomani1995@gmail.com)"}
+W, H = 1080, 1350
+PH = 800                      # photo area height
+NAVY, NAVY2, RED, WHITE, GREY = (10, 16, 28), (16, 24, 40), (220, 24, 12), (248, 248, 248), (150, 160, 178)
+FREE = re.compile(r"^(cc0|public domain|pd|cc by(-sa)? ?\d|cc-by(-sa)?-\d|attribution)", re.I)
+RAQM = ImageFont.Layout.RAQM
+
+
+def font(name, size, raqm=True):
+    return ImageFont.truetype(str(ASSETS / name), size, layout_engine=RAQM if raqm else ImageFont.Layout.BASIC)
+
+
+# ------------------------------------------------------------------ photo sourcing (legal only)
+def _get(url, timeout=25):
+    return urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=timeout).read()
+
+
+def commons_photo(query, min_w=1000):
+    """Best freely-licensed photo on Wikimedia Commons for `query` -> (PIL image, credit) or None."""
+    if not query:
+        return None
+    q = urllib.parse.quote(f"{query} filetype:bitmap")
+    url = ("https://commons.wikimedia.org/w/api.php?action=query&format=json&formatversion=2&generator=search"
+           f"&gsrnamespace=6&gsrlimit=12&gsrsearch={q}&prop=imageinfo&iiprop=url|size|mime|extmetadata"
+           "&iiurlwidth=1600&iiextmetadatafilter=LicenseShortName|Artist|Restrictions")
+    try:
+        pages = json.loads(_get(url)).get("query", {}).get("pages", [])
+    except Exception:
+        return None
+    cands = []
+    for p in pages:
+        ii = (p.get("imageinfo") or [{}])[0]
+        m = ii.get("extmetadata", {})
+        lic = (m.get("LicenseShortName", {}).get("value") or "").strip()
+        if not FREE.match(lic) or "nc" in lic.lower() or "nd" in lic.lower():
+            continue
+        if ii.get("mime") not in ("image/jpeg", "image/png", "image/webp") or ii.get("width", 0) < min_w:
+            continue
+        if m.get("Restrictions", {}).get("value"):          # personality/trademark restrictions -> skip
+            continue
+        title = p.get("title", "").lower()
+        if not any(w.lower() in title for w in query.split() if len(w) > 3):
+            continue
+        if any(b in title for b in ("logo", "flag", "map", "coat of arms", "seal", "diagram", "chart", "signature")):
+            continue
+        artist = re.sub(r"<[^>]+>", "", m.get("Artist", {}).get("value") or "").strip()[:40] or "Wikimedia Commons"
+        score = p.get("index", 50) * -1 + (8 if ii["width"] >= 1600 else 0) + (4 if ii["width"] > ii["height"] else 0)
+        cands.append((score, ii.get("thumburl") or ii["url"], f"{artist} / {lic}"))
+    for _, u, credit in sorted(cands, reverse=True)[:3]:
+        try:
+            im = Image.open(io.BytesIO(_get(u, 40))).convert("RGB")
+            if im.width >= 800:
+                return im, credit
+        except Exception:
+            continue
+    return None
+
+
+def wiki_photo(entity):
+    """Lead image of the entity's English Wikipedia article (precise for people/places), licence-checked."""
+    if not entity:
+        return None
+    try:
+        t = urllib.parse.quote(entity.replace(" ", "_"))
+        s = json.loads(_get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{t}"))
+        src = (s.get("originalimage") or {}).get("source")
+        if not src or s.get("type") == "disambiguation":
+            return None
+        fname = urllib.parse.unquote(src.split("/")[-1])
+        meta = json.loads(_get("https://commons.wikimedia.org/w/api.php?action=query&format=json&formatversion=2"
+                               f"&titles=File:{urllib.parse.quote(fname)}&prop=imageinfo&iiprop=url|size|mime|extmetadata"
+                               "&iiurlwidth=1600&iiextmetadatafilter=LicenseShortName|Artist"))
+        ii = meta["query"]["pages"][0]["imageinfo"][0]
+        lic = ii["extmetadata"].get("LicenseShortName", {}).get("value", "")
+        if not FREE.match(lic) or "nc" in lic.lower() or "nd" in lic.lower() or ii.get("width", 0) < 600:
+            return None
+        if ii.get("mime") not in ("image/jpeg", "image/png", "image/webp"):
+            return None
+        artist = re.sub(r"<[^>]+>", "", ii["extmetadata"].get("Artist", {}).get("value") or "").strip()[:40]
+        im = Image.open(io.BytesIO(_get(ii.get("thumburl") or ii["url"], 40))).convert("RGB")
+        return im, f"{artist or 'Wikimedia Commons'} / {lic}"
+    except Exception:
+        return None
+
+
+# ------------------------------------------------------------------ vector map fallback
+def map_image(country_en):
+    try:
+        geo = json.loads((ASSETS / "countries.geojson").read_text())
+    except Exception:
+        return None
+    target = None
+    for f in geo["features"]:
+        if country_en and country_en.lower() in (f["properties"]["n"] or "").lower():
+            target = f
+            break
+    if not target:
+        return None
+
+    def rings(g):
+        if g["type"] == "Polygon":
+            return [g["coordinates"][0]]
+        return [poly[0] for poly in g["coordinates"]]
+
+    tr = rings(target["geometry"])
+    xs = [x for r in tr for x, _ in r]
+    ys = [y for r in tr for _, y in r]
+    cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+    span = max(max(xs) - min(xs), (max(ys) - min(ys)) * W / PH, 12) * 2.6
+    x0, x1 = cx - span / 2, cx + span / 2
+    yspan = span * PH / W
+    y0, y1 = cy - yspan / 2, cy + yspan / 2
+    S = 2
+    im = Image.new("RGB", (W * S, PH * S), (12, 22, 40))
+    d = ImageDraw.Draw(im)
+    for gx in range(0, W * S, 60 * S):                          # subtle grid
+        d.line([(gx, 0), (gx, PH * S)], fill=(18, 30, 52), width=S)
+    for gy in range(0, PH * S, 60 * S):
+        d.line([(0, gy), (W * S, gy)], fill=(18, 30, 52), width=S)
+
+    def P(r):
+        return [((x - x0) / (x1 - x0) * W * S, (y1 - y) / (y1 - y0) * PH * S) for x, y in r]
+
+    for f in geo["features"]:
+        for r in rings(f["geometry"]):
+            d.polygon(P(r), fill=(32, 46, 72), outline=(60, 78, 110))
+    for r in tr:
+        d.polygon(P(r), fill=RED, outline=(255, 120, 100))
+    px, py = (cx - x0) / (x1 - x0) * W * S, (y1 - cy) / (y1 - y0) * PH * S
+    for rad, a in ((90, 40), (55, 90)):
+        d.ellipse([px - rad * S, py - rad * S, px + rad * S, py + rad * S], outline=(255, 255, 255), width=2 * S)
+    return im.resize((W, PH), Image.LANCZOS), "خريطة: Natural Earth"
+
+
+# ------------------------------------------------------------------ composition
+def cover(im, w, h):
+    r = max(w / im.width, h / im.height)
+    im = im.resize((int(im.width * r + 1), int(im.height * r + 1)), Image.LANCZOS)
+    x = (im.width - w) // 2
+    y = max(0, int((im.height - h) * 0.28))                    # keep faces (upper third) in frame
+    return im.crop((x, y, x + w, y + h))
+
+
+def grade(im):
+    im = ImageEnhance.Color(im).enhance(0.88)
+    im = ImageEnhance.Contrast(im).enhance(1.08)
+    tint = Image.new("RGB", im.size, (14, 24, 44))
+    return Image.blend(im, tint, 0.12)
+
+
+def wrap(d, text, f, width):
+    words, lines, cur = text.split(), [], ""
+    for w in words:
+        t = (cur + " " + w).strip()
+        if d.textlength(t, font=f, direction="rtl", language="ar") <= width:
+            cur = t
+        else:
+            lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def draw_rtl_line(d, x_right, y, line, f, hl_words):
+    """Draw one RTL line word by word so highlighted words can be red."""
+    words = line.split()
+    space = d.textlength(" ", font=f)
+    x = x_right
+    for w in words:
+        wl = d.textlength(w, font=f, direction="rtl", language="ar")
+        col = RED if w.strip("،.:؛!؟\"«»") in hl_words else WHITE
+        d.text((x, y), w, font=f, fill=col, anchor="ra", direction="rtl", language="ar")
+        x -= wl + space
+
+
+def badge(d, x, y, scale=1.0):
+    f1 = font("Barlow-BlackItalic.ttf", int(40 * scale), raqm=False)
+    f2 = font("Barlow-BlackItalic.ttf", int(22 * scale), raqm=False)
+    d.text((x, y), "KAHWA", font=f1, fill=WHITE, anchor="lm")
+    lw = d.textlength("KAHWA", font=f1)
+    bx = x + lw + 10 * scale
+    d.polygon([(bx + 8 * scale, y - 16 * scale), (bx + 104 * scale, y - 16 * scale), (bx + 96 * scale, y + 16 * scale),
+               (bx, y + 16 * scale)], fill=RED)
+    d.text((bx + 52 * scale, y + 1), "NEWS", font=f2, fill=WHITE, anchor="mm")
+
+
+def render(headline, category, urgent, out, photo_query=None, country_en=None, highlight="", entity=None):
+    src = (wiki_photo(entity) or commons_photo(photo_query) or wiki_photo(country_en and f"Capital of {country_en}")
+           or map_image(country_en))
+    canvas = Image.new("RGB", (W, H), NAVY)
+    credit = ""
+    if src:
+        img, credit = src
+        if not credit.startswith("خريطة"):
+            img = grade(cover(img, W, PH))
+        canvas.paste(img, (0, 0))
+    else:                                                      # brand pattern fallback
+        d0 = ImageDraw.Draw(canvas)
+        for i, a in enumerate((18, 12, 8)):
+            d0.polygon([(W - 520 + i * 140, 0), (W - 380 + i * 140, 0), (W - 780 + i * 140, PH),
+                        (W - 920 + i * 140, PH)], fill=(10 + a, 16 + a, 34 + a))
+    # fade photo into the text panel + top vignette for the badge
+    fade = Image.new("L", (1, H), 0)
+    for y in range(H):
+        if y < 170:
+            v = int(120 * (1 - y / 170))
+        elif y < PH - 330:
+            v = 0
+        elif y < PH:
+            v = int(255 * ((y - (PH - 330)) / 330) ** 1.6)
+        else:
+            v = 255
+        fade.putpixel((0, y), v)
+    canvas = Image.composite(Image.new("RGB", (W, H), NAVY), canvas, fade.resize((W, H)))
+    d = ImageDraw.Draw(canvas)
+
+    badge(d, 56, 70, 1.0)
+    date = datetime.now(timezone.utc).strftime("%d.%m.%Y")
+    d.text((W - 56, 70), date, font=font("Barlow-BlackItalic.ttf", 28, raqm=False), fill=(235, 235, 235), anchor="rm")
+
+    # headline block, bottom-anchored
+    f_tag = font("Tajawal-Black.ttf", 40)
+    size = 74
+    while True:
+        f_h = font("Tajawal-Black.ttf", size)
+        lines = wrap(d, headline, f_h, W - 130)
+        if len(lines) <= 4 or size <= 54:
+            break
+        size -= 4
+    lines = lines[:5]
+    lh = int(size * 1.42)
+    block_h = len(lines) * lh
+    base = H - 150 - block_h                                    # top of headline
+    # label on the seam
+    tag = "عاجل" if urgent else (category or "دولي")
+    tw = d.textlength(tag, font=f_tag, direction="rtl", language="ar")
+    ty = base - 92
+    xr = W - 64
+    d.polygon([(xr - tw - 56, ty), (xr + 8, ty), (xr - 6, ty + 64), (xr - tw - 70, ty + 64)], fill=RED)
+    if urgent:
+        d.ellipse([xr - tw - 44, ty + 25, xr - tw - 30, ty + 39], fill=WHITE)
+    d.text((xr - 22, ty + 31), tag, font=f_tag, fill=WHITE, anchor="rm", direction="rtl", language="ar")
+
+    hl = set(w.strip("،.:؛!؟\"«»") for w in (highlight or "").split())
+    y = base
+    for ln in lines:
+        draw_rtl_line(d, W - 64, y, ln, f_h, hl)
+        y += lh
+
+    # footer
+    d.line([(64, H - 104), (W - 64, H - 104)], fill=(40, 52, 76), width=2)
+    f_s = font("Tajawal-Medium.ttf", 26)
+    d.text((W - 64, H - 62), "قهوة نيوز | Kahwa News", font=f_s, fill=GREY, anchor="rm", direction="rtl", language="ar")
+    if credit:
+        f_c = font("Tajawal-Medium.ttf", 20)
+        cred = credit if credit.startswith("خريطة") else "صورة: " + credit
+        d.text((64, H - 62), cred[:70], font=f_c, fill=(110, 120, 140), anchor="lm", direction="rtl", language="ar")
+    canvas.save(out, "JPEG", quality=93, optimize=True, progressive=True)
+    return credit

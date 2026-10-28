@@ -135,7 +135,7 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 - البنية: سطر أول جذاب يبدأ بـ 🔴 (أو 🟡 إن لم يكن عاجلاً)، ثم 3 إلى 5 أسطر قصيرة بالتفاصيل الأهم، ثم سطر "لماذا يهم؟" بجملة واحدة، ثم سؤال قصير يدعو للنقاش، ثم 3 وسوم عربية.
 - اذكر في سطر أخير: "المصادر: " ثم أسماء المؤسسات فقط بدون روابط.
 أعد JSON فقط بهذا الشكل:
-{"headline": "عنوان للصورة لا يتجاوز 70 حرفاً", "category": "كلمة واحدة: سياسة/اقتصاد/علوم/صحة/تكنولوجيا/بيئة/عالم", "urgent": true/false, "post": "نص المنشور كاملاً", "safe": true/false}
+{"headline": "عنوان للصورة لا يتجاوز 70 حرفاً", "highlight": "كلمتان أو ثلاث من العنوان نفسه حرفياً هي الأهم", "category": "كلمة واحدة: سياسة/اقتصاد/علوم/صحة/تكنولوجيا/بيئة/دبلوماسية/دولي", "urgent": true/false, "entity": "عنوان مقالة ويكيبيديا الإنجليزية للشخص أو المكان أو المؤسسة الأبرز في الخبر بالضبط (مثال: Benjamin Netanyahu)", "photo_query": "2-4 English words to find a relevant real photo", "country_en": "English name of the main country", "post": "نص المنشور كاملاً", "safe": true/false}
 اجعل "safe" = false إذا كان الخبر رياضياً أو عن الجزائر أو الدين أو يتضمن عنفاً مصوراً أو معلومات لا يمكن التحقق منها.
 
 المصادر:
@@ -326,7 +326,11 @@ def main():
         sid = datetime.now(timezone.utc).strftime("%Y%m%d%H%M") + "-" + c["key"]
         MEDIA.mkdir(exist_ok=True)
         img = MEDIA / f"{sid}.jpg"
-        card(d["headline"], d.get("category"), d.get("urgent"), img)
+        from .card import render
+        credit = render(d["headline"], d.get("category"), d.get("urgent"), img, d.get("photo_query"),
+                        d.get("country_en"), d.get("highlight", ""), d.get("entity"))
+        if credit and not credit.startswith("خريطة"):
+            d["post"] += f"\n📷 {credit} (Wikimedia Commons)"
         url = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/media/{img.name}"
         post = {"id": sid, "text": d["post"], "media": [{"type": "image", "url": url}], "kind": "post",
                 "title": d["headline"], "priority": 3 if d.get("urgent") else 5, "sources": c["sources"],
