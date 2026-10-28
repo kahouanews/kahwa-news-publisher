@@ -191,6 +191,7 @@ def write_post(c):
     d = json.loads(raw)
     post = re.sub(r"https?://\S+|www\.\S+", "", d.get("post", "")).strip()
     if not d.get("safe", False) or len(post) < 120 or any(b in post for b in BLOCK[:8]):
+        print(json.dumps({"qa_reason": "unsafe/short"}))
         return None
     # fact-check pass: a second, independent read compares every claim with the sources
     chk = llm(CHECK + "\n\nالمصادر:\n" + src + "\n\nالمنشور:\n" + post)
@@ -198,6 +199,7 @@ def write_post(c):
     if not chk.get("ok"):
         fixed = (chk.get("corrected_post") or "").strip()
         if len(fixed) < 120:
+            print(json.dumps({"qa_reason": "fact-check fix too short"}))
             return None
         post = re.sub(r"https?://\S+|www\.\S+", "", fixed)
         if chk.get("corrected_headline"):
@@ -207,8 +209,10 @@ def write_post(c):
     grams = {" ".join(srcw[i:i + 7]) for i in range(len(srcw) - 6)}
     pw = norm(post).split()
     if any(" ".join(pw[i:i + 7]) in grams for i in range(len(pw) - 6)):
+        print(json.dumps({"qa_reason": "copied 7-gram"}))
         return None
     if not post.lstrip().startswith(("🔴", "🟡")) or "المصادر" not in post or "لماذا يهم" not in post:
+        print(json.dumps({"qa_reason": "structure"}))
         return None
     d["post"] = post
     return d
@@ -294,12 +298,13 @@ def main():
         return 0
     seen = load_seen()
     clusters = cluster(fetch())
-    made = 0
+    made = tried = 0
     for c in clusters:
-        if made >= x.max:
+        if made >= x.max or tried >= int(os.getenv("MAX_TRIES", "5")):
             break
         if len(c["sources"]) < int(os.getenv("MIN_SOURCES", "2")) or blocked(c) or is_seen(seen, c):
             continue
+        tried += 1
         try:
             d = write_post(c)
         except Exception as ex:
@@ -307,6 +312,7 @@ def main():
             break
         seen["stories"].append({"t": time.time(), "tok": sorted(c["tok"])[:40], "key": c["key"]})
         if not d:
+            print(json.dumps({"rejected_by_qa": c["items"][0]["title"][:90]}, ensure_ascii=False))
             continue
         sid = datetime.now(timezone.utc).strftime("%Y%m%d%H%M") + "-" + c["key"]
         MEDIA.mkdir(exist_ok=True)
