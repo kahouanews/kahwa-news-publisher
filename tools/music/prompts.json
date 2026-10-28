@@ -1,0 +1,31 @@
+{
+ "model": {"lm_model": "acestep-5Hz-lm-1.7B-Q8_0.gguf", "synth_model": "acestep-v15-xl-turbo-Q8_0.gguf",
+           "inference_steps": 8, "guidance_scale": 1.0, "shift": 3.0},
+ "common_caption_tail": ", instrumental only, no vocals, no choir, no spoken words, background underscore for a news video, steady dynamics, clean modern mix",
+ "tracks": [
+  {"id": "serious-01", "mood": "serious", "bpm": 92, "key": "D minor", "duration": 80, "seed": 1101, "caption": "Serious documentary news underscore, pulsing low synth bass in eighth notes, soft felt piano ostinato, subtle muted percussion, cinematic, focused, neutral"},
+  {"id": "serious-02", "mood": "serious", "bpm": 96, "key": "A minor", "duration": 80, "seed": 1102, "caption": "Modern current-affairs background, minimal electronic pulse, warm analog pad, light ticking hi-hat, low cello drone, restrained and informative"},
+  {"id": "serious-03", "mood": "serious", "bpm": 88, "key": "E minor", "duration": 80, "seed": 1103, "caption": "Investigative documentary bed, deep sub bass pulse, sparse piano notes with long reverb, soft string swells, thoughtful, neutral tone"},
+  {"id": "serious-04", "mood": "serious", "bpm": 100, "key": "G minor", "duration": 80, "seed": 1104, "caption": "World news explainer background, arpeggiated synth plucks, steady soft kick, airy pad, light percussion, calm confident and neutral"},
+  {"id": "serious-05", "mood": "serious", "bpm": 90, "key": "C minor", "duration": 80, "seed": 1105, "caption": "Cinematic minimal underscore, staccato string ostinato, low piano, gentle electronic pulse, serious but not dramatic"},
+  {"id": "serious-06", "mood": "serious", "bpm": 94, "key": "F minor", "duration": 80, "seed": 1106, "caption": "Analytical news background, glassy synth arpeggio, rounded bass, brushed electronic percussion, focused, understated"},
+  {"id": "calm-01", "mood": "calm", "bpm": 64, "key": "D minor", "duration": 85, "seed": 2101, "caption": "Slow ambient drone, warm string pad, sparse soft piano notes, somber and reflective, respectful, no drums, no percussion"},
+  {"id": "calm-02", "mood": "calm", "bpm": 60, "key": "B minor", "duration": 85, "seed": 2102, "caption": "Gentle ambient soundscape, soft evolving synth pads, distant low strings, quiet and mournful, no drums, no beat"},
+  {"id": "calm-03", "mood": "calm", "bpm": 68, "key": "A minor", "duration": 85, "seed": 2103, "caption": "Reflective ambient piano, slow sustained chords, soft cello, airy reverb, calm and compassionate, no percussion"},
+  {"id": "calm-04", "mood": "calm", "bpm": 62, "key": "E minor", "duration": 85, "seed": 2104, "caption": "Minimal ambient texture, low warm drone, slow string swells, very sparse bell-like piano, solemn, no drums"},
+  {"id": "calm-05", "mood": "calm", "bpm": 66, "key": "C minor", "duration": 85, "seed": 2105, "caption": "Quiet cinematic ambient, soft analog pad, slow cello line, gentle tape warmth, sad but restrained, no rhythm section"},
+  {"id": "calm-06", "mood": "calm", "bpm": 58, "key": "F# minor", "duration": 85, "seed": 2106, "caption": "Soft ambient background, layered warm pads, distant piano, long reverb tails, peaceful and solemn, no drums"},
+  {"id": "tension-01", "mood": "tension", "bpm": 124, "key": "D minor", "duration": 75, "seed": 3101, "caption": "Urgent breaking news tension bed, fast ticking clock-like hi-hat, pulsing low synth bass, staccato strings, suspense, driving but not aggressive"},
+  {"id": "tension-02", "mood": "tension", "bpm": 120, "key": "C minor", "duration": 75, "seed": 3102, "caption": "Breaking news background pulse, sixteenth-note synth sequence, deep sub hits, tight electronic percussion, tense and alert"},
+  {"id": "tension-03", "mood": "tension", "bpm": 128, "key": "E minor", "duration": 75, "seed": 3103, "caption": "High-urgency news underscore, rhythmic string ostinato, low brass-like synth swells, ticking percussion, suspenseful, steady energy"},
+  {"id": "tension-04", "mood": "tension", "bpm": 118, "key": "G minor", "duration": 75, "seed": 3104, "caption": "Tense electronic pulse, gated bass, metallic ticks, dark pad, alert and urgent, minimal melody"},
+  {"id": "tension-05", "mood": "tension", "bpm": 126, "key": "A minor", "duration": 75, "seed": 3105, "caption": "Urgent cinematic pulse, driving staccato cellos, low drum hits, rising synth texture, alert news tension, no big climax"},
+  {"id": "tension-06", "mood": "tension", "bpm": 122, "key": "B minor", "duration": 75, "seed": 3106, "caption": "Fast news alert bed, pulsing arpeggiated synth bass, crisp hi-hat ticks, dark atmosphere, tension and momentum"},
+  {"id": "light-01", "mood": "light", "bpm": 104, "key": "C major", "duration": 80, "seed": 4101, "caption": "Light optimistic electronic background, soft marimba plucks, airy pads, gentle four-on-the-floor beat, curious and hopeful, science explainer"},
+  {"id": "light-02", "mood": "light", "bpm": 108, "key": "G major", "duration": 80, "seed": 4102, "caption": "Bright inspiring technology background, clean pizzicato strings, glassy synth bells, soft claps, positive and modern"},
+  {"id": "light-03", "mood": "light", "bpm": 100, "key": "D major", "duration": 80, "seed": 4103, "caption": "Uplifting minimal corporate electronic, warm electric piano chords, light shaker, soft bass, friendly and informative"},
+  {"id": "light-04", "mood": "light", "bpm": 110, "key": "F major", "duration": 80, "seed": 4104, "caption": "Curious discovery background, playful plucked synth arpeggio, soft kick, airy pads, optimistic space and science vibe"},
+  {"id": "light-05", "mood": "light", "bpm": 102, "key": "A major", "duration": 80, "seed": 4105, "caption": "Calm positive economy news background, soft acoustic guitar picking, light piano, gentle percussion, confident and hopeful"},
+  {"id": "light-06", "mood": "light", "bpm": 106, "key": "E major", "duration": 80, "seed": 4106, "caption": "Gentle upbeat electronic, warm synth chords, light percussion, soft bell melody, optimistic innovation theme"}
+ ]
+}
