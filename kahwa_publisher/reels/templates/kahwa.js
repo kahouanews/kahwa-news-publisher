@@ -9,6 +9,16 @@
   // name (properties.ar) - Morocco / Algeria / UAE included (map label layer only). The merged Palestine/Israel shape
   // (properties.nl = 1) has no internal border and never any text. A map never focuses on a NO_FOCUS territory.
   const NO_FOCUS = ["MAR", "DZA", "ARE", "ISR", "PSE", "PSX"];
+  // Owner 2026-10-29 ("I don't see Western Sahara separated from Morocco"): whenever any part of Western Sahara is on
+  // screen, «الصحراء الغربية» AND «المغرب» are both written, highest priority after the target, on either side of the
+  // 27°40'N border. Same anchors as geo.PRIORITY_ANCHORS; then a grid inside the visible part; then smaller font steps
+  // and a 2-line split; last resort (only a sliver on screen) the name on the sea right beside it.
+  const PAIR_TRIGGER = "ESH";
+  const PRIORITY_ANCHORS = {
+    ESH: [[-13.0, 25.0], [-12.5, 26.0], [-11.0, 26.5], [-14.0, 24.5], [-13.6, 23.6], [-10.2, 26.8], [-14.8, 22.8], [-15.8, 22.0]],
+    MAR: [[-7.19, 31.65], [-6.2, 33.0], [-8.0, 30.6], [-9.2, 29.6], [-5.4, 32.2], [-10.0, 28.3], [-6.5, 31.2]],
+  };
+  const PRIORITY_SPLIT = { ESH: ["الصحراء", "الغربية"] };
   const MAPOK = !!(S.location && S.location.map && S.location.map.ok && window.WORLD && !NO_FOCUS.includes(S.location.country_iso3));
   gsap.registerPlugin(CustomEase);
   const E = {
@@ -180,7 +190,7 @@
     const mk = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); svg.appendChild(e); return e; };
     const sphere = mk("path", { fill: "url(#oc)", stroke: "#2A3142", "stroke-width": 2 });
     const grat = mk("path", { fill: "none", stroke: "rgba(42,49,66,0.55)", "stroke-width": 1 });
-    const land = mk("path", { fill: "#1C2232", stroke: "#3B4762", "stroke-width": 1.4, "stroke-linejoin": "round" });
+    const land = mk("path", { fill: "#1C2232", stroke: "#8A9AC0", "stroke-width": 2.4, "stroke-linejoin": "round" });   // borders readable at 1080px (MAR / ESH)
     const sec = mk("path", { fill: "rgba(220,24,12,0)", stroke: "rgba(255,77,64,0)", "stroke-width": 3 });
     const glow = mk("circle", { fill: "url(#hl)", r: 0 });
     const tgt = mk("path", { fill: "#DC180C", "fill-opacity": 0.0, stroke: "#FF4D40", "stroke-width": 3, "stroke-opacity": 0 });
@@ -191,11 +201,15 @@
     // label layer: one <text> per labelled country (never the merged Palestine/Israel shape, never the target: its
     // name is the scene's pill), placed each frame: front hemisphere only, big enough on screen, important first, no overlap
     const labG = mk("g", { "font-family": "Almarai, sans-serif", "font-weight": 700, "text-anchor": "middle", direction: "rtl" });
-    const LABS = feats.filter((f) => f !== target && !f.properties.nl && f.properties.ar && f.properties.l)
+    const mkText = (f) => { const t = document.createElementNS(NS, "text"); t.textContent = f.properties.ar; t.setAttribute("fill", "#C2CDE2");
+      t.setAttribute("stroke", "#0B0F18"); t.setAttribute("stroke-width", 5); t.setAttribute("paint-order", "stroke");
+      t.setAttribute("dominant-baseline", "middle"); labG.appendChild(t); return { f, t }; };
+    const PRIO = [PAIR_TRIGGER, "MAR"].map((a) => feats.find((f) => f.properties.a === a))
+      .filter((f) => f && f !== target && !f.properties.nl && f.properties.ar).map(mkText);
+    const trigger = feats.find((f) => f.properties.a === PAIR_TRIGGER);
+    const LABS = feats.filter((f) => f !== target && !f.properties.nl && f.properties.ar && f.properties.l && !PRIO.some((q) => q.f === f))
       .sort((a, b) => (a.properties.r || 5) - (b.properties.r || 5))
-      .map((f) => { const t = document.createElementNS(NS, "text"); t.textContent = f.properties.ar; t.setAttribute("fill", "#AEBBD3");
-        t.setAttribute("stroke", "#0B0F18"); t.setAttribute("stroke-width", 5); t.setAttribute("paint-order", "stroke");
-        t.setAttribute("dominant-baseline", "middle"); labG.appendChild(t); return { f, t }; });
+      .map(mkText);
     const labelsOn = opt.labels !== false;
     const secondary = opt.secIso3 ? feats.find((f) => f.properties.a === opt.secIso3) : null;
     const others = { type: "FeatureCollection", features: feats.filter((f) => f !== target) };
@@ -222,9 +236,84 @@
       if (labelsOn) placeLabels();
       (opt.onRender || []).forEach((f) => f(proj, st));
     }
+    const onScreen = (b) => isFinite(b[0][0]) && b[1][0] > 0 && b[0][0] < 1080 && b[1][1] > 0 && b[0][1] < 1920;
+    const overlaps = (box, boxes) => boxes.some((q) => !(box[2] < q[0] || box[0] > q[2] || box[3] < q[1] || box[1] > q[3]));
+    function setLines(t, lines, x, y, fs) {
+      while (t.firstChild) t.removeChild(t.firstChild);
+      if (lines.length === 1) { t.textContent = lines[0]; t.setAttribute("y", y); }
+      else lines.forEach((ln, i) => { const s = document.createElementNS(NS, "tspan"); s.textContent = ln; s.setAttribute("x", x);
+        s.setAttribute("y", y + (i - (lines.length - 1) / 2) * fs * 1.15); t.appendChild(s); });
+      t.setAttribute("x", x); t.setAttribute("font-size", fs);
+    }
+    function textW(t, lines, fs) {
+      let w = 0;
+      for (const ln of lines) { t.textContent = ln; t.setAttribute("font-size", fs); let v = 0; try { v = t.getComputedTextLength(); } catch (e) { v = 0; }
+        w = Math.max(w, v > 0 ? v : ln.length * fs * 0.52); }
+      return w;
+    }
+    // Western Sahara + Morocco: always both names when any part of Western Sahara is on screen
+    function placePriority(boxes, fs) {
+      if (!trigger || !onScreen(path.bounds(trigger))) return;
+      for (const { f, t } of PRIO) {
+        const b = path.bounds(f);
+        if (!onScreen(b)) continue;
+        const cb = [Math.max(b[0][0], 12), Math.max(b[0][1], 8), Math.min(b[1][0], 1068), Math.min(b[1][1], 1900)];
+        const pts = (PRIORITY_ANCHORS[f.properties.a] || []).map((ll) => d3.geoDistance(ll, [st.lon, st.lat]) < 1.4 ? proj(ll) : null).filter(Boolean);
+        const mx = (cb[0] + cb[2]) / 2, my = (cb[1] + cb[3]) / 2, grid = [];
+        for (let i = 1; i < 10; i++) for (let j = 1; j < 10; j++) grid.push([cb[0] + (cb[2] - cb[0]) * i / 10, cb[1] + (cb[3] - cb[1]) * j / 10]);
+        grid.sort((p, q) => Math.hypot(p[0] - mx, p[1] - my) - Math.hypot(q[0] - mx, q[1] - my));
+        const cand = pts.concat(grid);
+        const near = feats.filter((g) => g !== f && onScreen(path.bounds(g)));
+        const variants = [[[f.properties.ar], 1], [[f.properties.ar], 0.85], [[f.properties.ar], 0.72]];
+        if (PRIORITY_SPLIT[f.properties.a]) [0.92, 0.78, 0.66].forEach((k) => variants.push([PRIORITY_SPLIT[f.properties.a], k]));
+        variants.push([[f.properties.ar], 0.6], [[f.properties.ar], 0.5]);
+        // last resort (only a sliver of the country on screen): the name on the sea right beside it, slid into the frame
+        let edge = null;
+        const edgePts = () => {                                                       // computed only when needed
+          if (edge) return edge;
+          const fine = [];
+          for (let i = 0; i < 24; i++) for (let j = 0; j < 24; j++) fine.push([cb[0] + (cb[2] - cb[0]) * (i + 0.5) / 24, cb[1] + (cb[3] - cb[1]) * (j + 0.5) / 24]);
+          const ins = fine.filter((p) => { const ll = proj.invert(p); return ll && d3.geoContains(f, ll); });
+          const byX = ins.slice().sort((p, q) => p[0] - q[0]), byY = ins.slice().sort((p, q) => p[1] - q[1]);
+          return (edge = byX.slice(0, 4).concat(byX.slice(-4), byY.slice(0, 4), byY.slice(-4), ins));
+        };
+        const tries = variants.map(([lines, k]) => [lines, k, false]).concat(variants.slice(-3).map(([lines, k]) => [lines, k, true]));
+        let done = false;
+        for (const [lines, k, beside] of tries) {
+          const s = Math.round(fs * k), tw = textW(t, lines, s), hh = s * 0.7 + (lines.length - 1) * s * 0.575;
+          let pos = cand;
+          if (beside) { pos = []; edgePts().forEach((p) => pos.push([p[0] - tw / 2 - 14, p[1]], [p[0] + tw / 2 + 14, p[1]], [p[0], p[1] - hh - 8], [p[0], p[1] + hh + 8])); }
+          for (let p of pos) {
+            if (!beside) {
+              if (p[0] < 0 || p[0] > 1080 || p[1] < 0 || p[1] > 1920) continue;
+              const ll = proj.invert(p);
+              if (!ll || !d3.geoContains(f, ll)) continue;                            // anchor inside the country
+            } else {
+              p = [p[0] + Math.max(0, 14 + tw / 2 - p[0]) - Math.max(0, p[0] + tw / 2 + 14 - 1080),
+                   p[1] + Math.max(0, 8 + hh - p[1]) - Math.max(0, p[1] + hh + 8 - 1920)];
+            }
+            const box = [p[0] - tw / 2 - 6, p[1] - hh, p[0] + tw / 2 + 6, p[1] + hh];
+            if (box[0] < 8 || box[2] > 1072 || box[1] < 4 || box[3] > 1910 || overlaps(box, boxes)) continue;   // edges ok: must show
+            // the whole name on its own country or the sea, never across the border onto a neighbour / the target
+            let bad = false;
+            for (let i = 0; i < 5 && !bad; i++) for (let j = 0; j < 3 && !bad; j++) {
+              const q = proj.invert([box[0] + 6 + (box[2] - box[0] - 12) * i / 4, [box[1] + 4, (box[1] + box[3]) / 2, box[3] - 4][j]]);
+              if (q && !d3.geoContains(f, q) && near.some((g) => d3.geoContains(g, q))) bad = true;
+            }
+            if (bad) continue;
+            boxes.push(box); setLines(t, lines, p[0], p[1], s); t.setAttribute("visibility", "visible"); done = true; break;
+          }
+          if (done) break;
+        }
+        if (!done) setLines(t, [f.properties.ar], -999, -999, fs);
+      }
+    }
     function placeLabels() {
       const boxes = [], ctr = [st.lon, st.lat], fs = Math.round(Math.max(22, Math.min(34, st.scale / 60)));
       if (pt) { const p = proj([pt.lon, pt.lat]); if (p) boxes.push([p[0] - 130, p[1] - 130, p[0] + 130, p[1] + 130]); }
+      (opt.avoid ? opt.avoid(proj, st) : []).forEach((b) => boxes.push(b));      // scene pills (country / city names)
+      for (const { t } of PRIO) t.setAttribute("visibility", "hidden");
+      placePriority(boxes, fs);
       if (target) { const b = path.bounds(target); if (isFinite(b[0][0])) boxes.push([b[0][0], b[0][1], b[1][0], b[1][1]]); }
       for (const { f, t } of LABS) {
         t.setAttribute("visibility", "hidden");
@@ -241,10 +330,11 @@
           if (!ll || !d3.geoContains(f, ll)) continue;
         }
         const box = [p[0] - tw / 2 - 6, p[1] - fs * 0.7, p[0] + tw / 2 + 6, p[1] + fs * 0.7];
-        if (boxes.some((q) => !(box[2] < q[0] || box[0] > q[2] || box[3] < q[1] || box[1] > q[3]))) continue;
+        if (overlaps(box, boxes)) continue;
         boxes.push(box);
         t.setAttribute("x", p[0]); t.setAttribute("y", p[1]); t.setAttribute("font-size", fs); t.setAttribute("visibility", "visible");
       }
+      window.KAHWA_MAP_LABELS = PRIO.concat(LABS).filter((q) => q.t.getAttribute("visibility") === "visible").map((q) => q.f.properties.a);
     }
     render();
     function to(vals, t, d, ease) {
@@ -344,6 +434,10 @@
       const city = el("div", "map-label pill dark", d, esc(loc.point.label_ar));
       const m = makeMap(d, {
         iso3: loc.country_iso3, point: loc.point, state: { lon: mv.lon, lat: mv.lat, scale: mv.s0, cx: 540, cy: mv.cy },
+        avoid: (proj) => {                                        // keep map labels off the country pill
+          const a = proj(cen), w = (lab.offsetWidth || 360) / 2 + 10, h = (lab.offsetHeight || 80) / 2 + 6;
+          return a ? [[a[0] - w, a[1] - 30 - h, a[0] + w, a[1] - 30 + h]] : [];
+        },
         onRender: [(proj) => {
           const a = proj(cen) || [-900, 0]; lab.style.left = a[0] + "px"; lab.style.top = a[1] - 30 + "px";
           const cp = proj([loc.point.lon, loc.point.lat]) || [-500, 0]; city.style.left = cp[0] - 150 + "px"; city.style.top = cp[1] + 8 + "px";

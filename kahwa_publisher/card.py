@@ -108,9 +108,25 @@ def wiki_photo(entity):
 # ------------------------------------------------------------------ vector map fallback
 LAST_DRAWN = []          # ISO3 codes drawn by the last map_image() call
 LAST_LABELS = []         # (iso3, label) pairs written by the last map_image() call (tests: no label on the PSE shape)
+LAST_FRAME = []          # [lon0, lon1, lat0, lat1] of the last map_image() frame
+LAST_LABEL_AT = {}       # iso3 -> (lon, lat) of the label centre written by the last map_image() call
+BORDER = (150, 170, 206)  # every international border / coastline (readable at 1080px: MAR / ESH border, owner 2026-10-29)
 
 
-def map_image(country_en):
+def _pip(x, y, ring):
+    """Point in polygon (screen or lon/lat coordinates)."""
+    inside = False
+    j = len(ring) - 1
+    for i in range(len(ring)):
+        xi, yi = ring[i]
+        xj, yj = ring[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def map_image(country_en, zoom=1.0):
     """Normal country map (owner rules 2026-10-29, see geo.py): every neighbour drawn with its borders and its Arabic name,
     target in red. The merged Palestine/Israel shape is drawn with no internal border and no text; Western Sahara is its
     own shape; Morocco / Algeria / UAE are labelled on the map like any country (map label layer only). A map is never
@@ -118,6 +134,8 @@ def map_image(country_en):
     from . import geo
     LAST_DRAWN.clear()
     LAST_LABELS.clear()
+    LAST_LABEL_AT.clear()
+    LAST_FRAME.clear()
     feats = geo.features()
     q = (country_en or "").strip().lower()
     if not q or any(b == q or b in q for b in geo.NO_FOCUS_NAMES):
@@ -141,10 +159,11 @@ def map_image(country_en):
     ys = [y for _, y in main]
     cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
     base = max(max(xs) - min(xs), (max(ys) - min(ys)) * W / PH, 12)
-    span = base * (2.6 if base < 40 else 1.8 if base < 90 else 1.35)
+    span = base * (2.6 if base < 40 else 1.8 if base < 90 else 1.35) * zoom      # zoom > 1 = wider view (tests)
     x0, x1 = cx - span / 2, cx + span / 2
     yspan = span * PH / W
     y0, y1 = cy - yspan / 2, cy + yspan / 2
+    LAST_FRAME[:] = [x0, x1, y0, y1]
     S = 2
     im = Image.new("RGB", (W * S, PH * S), (12, 22, 40))
     d = ImageDraw.Draw(im)
@@ -170,28 +189,149 @@ def map_image(country_en):
         if drawn:
             LAST_DRAWN.append(f["properties"].get("a"))
     for f in feats:                                              # borders on top so every shared edge shows
-        for r in rings(f["geometry"]):
-            for off in (0, 360, -360):
+        for r in rings(f["geometry"]):                            # (brighter + thicker since 2026-10-29: the Morocco /
+            for off in (0, 360, -360):                            # Western Sahara border must read clearly at 1080px)
                 rr = [(x + off, y) for x, y in r]
                 if visible(rr):
-                    d.line(P(rr) + P(rr[:1]), fill=(84, 104, 140), width=2 * S, joint="curve")
+                    d.line(P(rr) + P(rr[:1]), fill=BORDER, width=3 * S, joint="curve")
     for r in tr:
         d.polygon(P(r), fill=RED)
         d.line(P(r) + P(r[:1]), fill=(255, 120, 100), width=2 * S, joint="curve")
     px, py = (cx - x0) / (x1 - x0) * W * S, (y1 - cy) / (y1 - y0) * PH * S
     for rad, a in ((90, 40), (55, 90)):
         d.ellipse([px - rad * S, py - rad * S, px + rad * S, py + rad * S], outline=(255, 255, 255), width=2 * S)
-    # ---- label layer: Arabic country names (never on the merged Palestine/Israel shape), important countries first,
-    # no overlaps, only where the country is big enough on screen to hold its name
-    f_lab = font("Almarai-Bold.ttf", 26 * S)
+    # ---- label layer: Arabic country names (never on the merged Palestine/Israel shape), target first, then Western
+    # Sahara + Morocco whenever Western Sahara is in view (always written: several anchors / font steps / 2 lines / on the
+    # sea beside a sliver), then the rest by importance, no overlaps, only where the country is big enough for its name
     f_tgt = font("Almarai-ExtraBold.ttf", 36 * S)
     placed = [(px - 92 * S, py - 92 * S, px + 92 * S, py + 92 * S)]     # never write over the target rings
+
+    def hits(box, others):
+        return any(not (box[2] < b[0] or box[0] > b[2] or box[3] < b[1] or box[1] > b[3]) for b in others)
+
+    def in_frame(box):
+        return box[0] >= 10 and box[2] <= W * S - 10 and box[1] >= 10 and box[3] <= PH * S - 10
+
+    def text_box(lines, fnt, X, Y):
+        tw = max(d.textlength(ln, font=fnt, direction="rtl", language="ar") for ln in lines)
+        lh = fnt.size * 1.15
+        hh = fnt.size * 0.7 + (len(lines) - 1) * lh / 2
+        return (X - tw / 2 - 8, Y - hh, X + tw / 2 + 8, Y + hh), tw, lh
+
+    def draw_label(iso, lab, lines, X, Y, fnt, lh, is_t=False):
+        n = len(lines)
+        for i, ln in enumerate(lines):
+            d.text((X, Y + (i - (n - 1) / 2) * lh), ln, font=fnt, anchor="mm", direction="rtl", language="ar",
+                   fill=(255, 255, 255) if is_t else (190, 202, 224), stroke_width=3 * S if is_t else 2 * S,
+                   stroke_fill=(12, 22, 40))
+        LAST_LABELS.append((iso, lab))
+        LAST_LABEL_AT[iso] = (x0 + X / (W * S) * (x1 - x0), y1 - Y / (PH * S) * (y1 - y0))
+
+    by_iso = {f["properties"].get("a"): f for f in feats}
+
+    def on_screen_rings(f):
+        out = []
+        for r in rings(f["geometry"]):
+            for off in (0, 360, -360):
+                rr = [(x + off, y) for x, y in r]
+                if visible(rr):
+                    out.append(rr)
+        return out
+
+    pair_on = geo.PAIR_TRIGGER in LAST_DRAWN
+    keep_free = [P(r) for iso in (geo.PAIR_TRIGGER, "MAR") if by_iso.get(iso) is not None and by_iso[iso] is not target
+                 for r in on_screen_rings(by_iso[iso])] if pair_on else []
+
+    # target (below the rings; when Western Sahara / Morocco are in view, never on top of them: above / beside instead)
+    if geo.label_of(target):
+        lab = geo.label_of(target)
+        below = (px, py + 120 * S) if py + 160 * S < PH * S else (px, py - 120 * S)
+        spots = [below, (px, py - 120 * S), (px + 190 * S, py), (px - 190 * S, py)] if keep_free else [below]
+        for X, Y in spots:
+            box, tw, lh = text_box([lab], f_tgt, X, Y)
+            if not in_frame(box):
+                continue
+            if keep_free and (X, Y) != spots[-1] and any(_pip(a, b, r) for a in (box[0], X, box[2])
+                                                         for b in (box[1], Y, box[3]) for r in keep_free):
+                continue
+            placed.append(box)
+            draw_label(target["properties"].get("a"), lab, [lab], X, Y, f_tgt, lh, True)
+            break
+    done = {target["properties"].get("a")}
+
+    # Western Sahara + Morocco: both names whenever any part of Western Sahara is in view
+    if pair_on:
+        for iso in (geo.PAIR_TRIGGER, "MAR"):
+            f = by_iso.get(iso)
+            lab = geo.label_of(f) if f else None
+            if not lab or iso in done:
+                continue
+            vis = on_screen_rings(f)
+            if not vis:
+                continue
+            spts = [P(r) for r in vis]
+            land = [P(r) for g in feats if g is not f for r in on_screen_rings(g)]
+            pts = list(geo.PRIORITY_ANCHORS.get(iso, []))
+            gx = [x for r in vis for x, _ in r]
+            gy = [y for r in vis for _, y in r]
+            bx0, bx1, by0, by1 = max(min(gx), x0), min(max(gx), x1), max(min(gy), y0), min(max(gy), y1)
+            mx, my = (bx0 + bx1) / 2, (by0 + by1) / 2
+            grid = [(bx0 + (bx1 - bx0) * i / 8, by0 + (by1 - by0) * j / 8) for i in range(1, 8) for j in range(1, 8)]
+            pts += sorted(grid, key=lambda q: (q[0] - mx) ** 2 + (q[1] - my) ** 2)
+            fine = [(bx0 + (bx1 - bx0) * (i + .5) / 24, by0 + (by1 - by0) * (j + .5) / 24) for i in range(24) for j in range(24)]
+            inside = [q for q in pts + fine if any(_pip(q[0], q[1], r) for r in vis)]
+            if inside:                                                # sea fallback: start from the outermost points
+                bx = sorted(inside, key=lambda q: q[0])
+                by_ = sorted(inside, key=lambda q: q[1])
+                inside = bx[:4] + bx[-4:] + by_[:4] + by_[-4:] + inside
+            variants = [([lab], sz) for sz in (26, 22, 19)]
+            if iso in geo.PRIORITY_SPLIT:
+                variants += [(list(geo.PRIORITY_SPLIT[iso]), sz) for sz in (24, 20, 17)]
+            variants += [([lab], 16)]
+            ok = False
+            for lines, sz, beside in [(ln, sz, False) for ln, sz in variants] + [(ln, sz, True) for ln, sz in variants[-3:]]:
+                fnt = font("Almarai-Bold.ttf", sz * S)
+                tries = []
+                for lx, ly in (inside if beside else pts):
+                    X, Y = (lx - x0) / (x1 - x0) * W * S, (y1 - ly) / (y1 - y0) * PH * S
+                    if not beside:
+                        tries.append((X, Y))
+                    else:                                             # last resort (a sliver of the country in view):
+                        bw, _t, _l = text_box(lines, fnt, 0, 0)       # the name on the sea right next to it
+                        hw, hh2 = (bw[2] - bw[0]) / 2 + 6 * S, (bw[3] - bw[1]) / 2 + 6 * S
+                        tries += [(X - hw, Y), (X + hw, Y), (X, Y - hh2), (X, Y + hh2)]
+                for X, Y in tries:
+                    if not beside and not any(_pip(X, Y, r) for r in spts):
+                        continue                                      # anchor must be inside the country
+                    box, tw, lh = text_box(lines, fnt, X, Y)
+                    if beside and not in_frame(box):                  # slide the sea label back inside the frame
+                        X += max(0, 12 - box[0]) - max(0, box[2] - (W * S - 12))
+                        Y += max(0, 12 - box[1]) - max(0, box[3] - (PH * S - 12))
+                        box, tw, lh = text_box(lines, fnt, X, Y)
+                    if not in_frame(box) or hits(box, placed):
+                        continue
+                    # the whole name sits on its own country (or on the sea), never across a border onto a neighbour
+                    xs5 = [box[0] + 6 + (box[2] - box[0] - 12) * k / 4 for k in range(5)]
+                    ys3 = [box[1] + 4, (box[1] + box[3]) / 2, box[3] - 4]
+                    if any(not any(_pip(a, b, r) for r in spts) and any(_pip(a, b, r) for r in land)
+                           for a in xs5 for b in ys3):
+                        continue
+                    placed.append(box)
+                    draw_label(iso, lab, lines, X, Y, fnt, lh)
+                    done.add(iso)
+                    ok = True
+                    break
+                if ok:
+                    break
+
+    # everyone else
+    f_lab = font("Almarai-Bold.ttf", 26 * S)
     cands = []
     for f in feats:
         lab = geo.label_of(f)
-        if not lab:
-            continue
         p = f["properties"]
+        if not lab or p.get("a") in done:
+            continue
         lx, ly = p.get("l") or (None, None)
         if lx is None:
             continue
@@ -200,27 +340,16 @@ def map_image(country_en):
                 fr = rings(f["geometry"])
                 fx = [x + off for r in fr for x, _ in r]
                 wpx = (max(fx) - min(fx)) / (x1 - x0) * W * S
-                is_t = f is target
-                cands.append((0 if is_t else 1, p.get("r", 5), -wpx, is_t, lab, lx + off, ly, wpx, p.get("a")))
-    for _k, _r, _w, is_t, lab, lx, ly, wpx, iso in sorted(cands, key=lambda c: c[:3]):
-        fnt = f_tgt if is_t else f_lab
-        tw = d.textlength(lab, font=fnt, direction="rtl", language="ar")
-        if not is_t and wpx < tw * 0.55:
-            continue                                             # country too small on screen for its name
+                cands.append((p.get("r", 5), -wpx, lab, lx + off, ly, wpx, p.get("a")))
+    for _r, _w, lab, lx, ly, wpx, iso in sorted(cands, key=lambda c: c[:2]):
         X, Y = (lx - x0) / (x1 - x0) * W * S, (y1 - ly) / (y1 - y0) * PH * S
-        if is_t:
-            Y = py + 120 * S if py + 160 * S < PH * S else py - 120 * S     # below the target rings
-            X = px
-        box = (X - tw / 2 - 8, Y - fnt.size * 0.7, X + tw / 2 + 8, Y + fnt.size * 0.7)
-        if box[0] < 10 or box[2] > W * S - 10 or box[1] < 10 or box[3] > PH * S - 10:
-            continue
-        if any(not (box[2] < b[0] or box[0] > b[2] or box[3] < b[1] or box[1] > b[3]) for b in placed[0 if not is_t else 1:]):
+        box, tw, lh = text_box([lab], f_lab, X, Y)
+        if wpx < tw * 0.55:
+            continue                                             # country too small on screen for its name
+        if not in_frame(box) or hits(box, placed):
             continue
         placed.append(box)
-        d.text((X, Y), lab, font=fnt, anchor="mm", direction="rtl", language="ar",
-               fill=(255, 255, 255) if is_t else (176, 190, 214), stroke_width=3 * S if is_t else 2 * S,
-               stroke_fill=(12, 22, 40))
-        LAST_LABELS.append((iso, lab))
+        draw_label(iso, lab, [lab], X, Y, f_lab, lh)
     return im.resize((W, PH), Image.LANCZOS), "خريطة: قهوة نيوز (بيانات Natural Earth)"
 
 

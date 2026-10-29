@@ -1,0 +1,101 @@
+{
+ "id": "maptest-mrt",
+ "date_ar": "الخميس 29 أكتوبر 2026",
+ "topic_ar": "اختبار",
+ "headline": "اختبار [[الخريطة]]: موريتانيا",
+ "headline_breaking": "اختبار [[الخريطة]]: موريتانيا",
+ "deck": "عرض تجريبي للخريطة فقط، لا يُنشر",
+ "visual_caption": "",
+ "visual_tab": "اختبار",
+ "location": {
+  "country_iso3": "MRT",
+  "label_ar": "موريتانيا",
+  "region_ar": "",
+  "point": {
+   "lon": -15.98,
+   "lat": 18.09,
+   "label_ar": "نواكشوط"
+  },
+  "map": {
+   "ok": true,
+   "lon": -12.425,
+   "lat": 18.831,
+   "s0": 2134,
+   "s1": 2511,
+   "cy": 600
+  }
+ },
+ "where_line": "[[موريتانيا]] على الخريطة",
+ "lower_third": {
+  "name_ar": "نواكشوط",
+  "role_ar": "نقطة اختبار",
+  "source": "وكالات"
+ },
+ "facts": [
+  {
+   "text": "سطر اختبار 1",
+   "source": "وكالات"
+  },
+  {
+   "text": "سطر اختبار 2",
+   "source": "وكالات"
+  },
+  {
+   "text": "سطر اختبار 3",
+   "source": "وكالات"
+  }
+ ],
+ "next": {
+  "title_ar": "ماذا بعد؟",
+  "lines": [
+   "سطر أ",
+   "سطر ب"
+  ],
+  "sources": [
+   "وكالات",
+   "وكالات"
+  ]
+ },
+ "breaking_lines": [
+  {
+   "text": "سطر عاجل 1",
+   "source": "وكالات"
+  },
+  {
+   "text": "سطر عاجل 2",
+   "source": "وكالات"
+  },
+  {
+   "text": "سطر عاجل 3",
+   "source": "وكالات"
+  },
+  {
+   "text": "سطر عاجل 4",
+   "source": "وكالات"
+  }
+ ],
+ "ticker": [
+  "سطر 1",
+  "سطر 2"
+ ],
+ "sources": [
+  "وكالات"
+ ],
+ "tagline": "أخبار العالم… باختصار",
+ "mood": "serious",
+ "tragic": false,
+ "urgent": false,
+ "footage_queries": [],
+ "media": {},
+ "big_number": {
+  "value": 0,
+  "display": "",
+  "prefix_ar": "",
+  "label_ar": "سطر اختبار",
+  "sub_ar": "اختبار",
+  "source": "وكالات"
+ },
+ "place_terms_en": [
+  "موريتانيا"
+ ]
+}

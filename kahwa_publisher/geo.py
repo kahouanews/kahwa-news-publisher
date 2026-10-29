@@ -6,7 +6,8 @@ Owner decisions 2026-10-29 (replace the earlier "banned countries are never draw
 - Morocco, Algeria and the UAE are drawn and labelled normally (المغرب، الجزائر، الإمارات). This is the MAP LABEL LAYER only:
   the text ban on these names in posts, captions, card text and reel lines is unchanged (newsroom.banned_country,
   reels.render.banned_hits). Map labels come from the data files, never from story text, so the text gates stay strict.
-- Western Sahara is its own shape, the border with Morocco drawn, labelled «الصحراء الغربية».
+- Western Sahara is its own shape over its full territory (border with Morocco = 27°40'N, see tools/maps/build_world.py),
+  the border drawn, labelled «الصحراء الغربية».
 - Israel + Palestine = ONE undivided shape (feature "PSE", property nl=1): no internal border, no label, no text.
 - A map is never centred / focused on Morocco, Algeria, the UAE, Israel or the Palestine/Israel shape (NO_FOCUS).
 """
@@ -19,6 +20,18 @@ ASSETS = Path(__file__).resolve().parent.parent / "assets"
 NO_FOCUS_ISO = frozenset({"MAR", "DZA", "ARE", "ISR", "PSE", "PSX"})
 NO_FOCUS_NAMES = ("morocco", "algeria", "united arab emirates", "emirates", "uae", "israel", "palestine")
 UNLABELLED = frozenset({"PSE"})                      # the merged Palestine/Israel shape never carries text
+# Owner 2026-10-29 ("I don't see Western Sahara separated from Morocco"): whenever any part of Western Sahara is in view,
+# «الصحراء الغربية» AND «المغرب» are both written (highest label priority after the target), on either side of the border.
+# Anchors (lon, lat) tried in order, inside each polygon; then a grid of points inside the visible part; then smaller font
+# steps and a 2-line split; last resort (only a sliver in view) the name on the sea right beside it.
+# Same lists in reels/templates/kahwa.js (PRIORITY_ANCHORS), checked by tests/test_maps.py.
+PAIR_TRIGGER = "ESH"
+PRIORITY_ANCHORS = {
+    "ESH": [(-13.0, 25.0), (-12.5, 26.0), (-11.0, 26.5), (-14.0, 24.5), (-13.6, 23.6), (-10.2, 26.8), (-14.8, 22.8),
+            (-15.8, 22.0)],
+    "MAR": [(-7.19, 31.65), (-6.2, 33.0), (-8.0, 30.6), (-9.2, 29.6), (-5.4, 32.2), (-10.0, 28.3), (-6.5, 31.2)],
+}
+PRIORITY_SPLIT = {"ESH": ("الصحراء", "الغربية")}       # 2-line fallback
 
 
 def label_of(f):
