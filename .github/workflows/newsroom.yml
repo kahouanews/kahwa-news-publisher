@@ -31,7 +31,8 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          if [ "$DRY" = "true" ]; then python -m kahwa_publisher.newsroom --dry --out out | tee out.log
+          export PYTHONUNBUFFERED=1
+          if [ "$DRY" = "true" ]; then python -m kahwa_publisher.newsroom --dry --out out 2>&1 | tee out.log
           else python -m kahwa_publisher.newsroom; fi
       - name: Dry-run summary
         if: always() && env.DRY == 'true'

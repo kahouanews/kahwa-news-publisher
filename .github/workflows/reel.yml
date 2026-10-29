@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 45
     env:
       DO_NOT_TRACK: "1"
+      PYTHONUNBUFFERED: "1"
       HYPERFRAMES_TELEMETRY: "0"
       KAHWA_BUILD: /tmp/kahwa-reel
       HF_WORKERS: "3"

@@ -228,7 +228,11 @@ def llm(prompt, temperature=0.6):
                         "generationConfig": {"temperature": temperature, "responseMimeType": "application/json"}}
                 req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
                                              headers={"Content-Type": "application/json", "x-goog-api-key": gk})
+                t_call = time.time()
                 r = json.loads(urllib.request.urlopen(req, timeout=90).read())
+                um = r.get("usageMetadata") or {}
+                print(json.dumps({"llm": f"gemini/{model}", "s": round(time.time() - t_call, 1), "in": um.get("promptTokenCount"),
+                                  "out": um.get("candidatesTokenCount"), "think": um.get("thoughtsTokenCount")}), flush=True)
                 return r["candidates"][0]["content"]["parts"][0]["text"]
             except Exception as ex:
                 errs.append(f"gemini/{model}#{attempt}: {str(ex)[:100]}")
