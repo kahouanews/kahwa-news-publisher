@@ -18,6 +18,7 @@ import json
 import os
 import re
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -214,6 +215,9 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 """
 
 
+_DEAD_MODELS = {}   # per-run circuit breaker: model -> reason (daily quota exhausted, 4xx)
+
+
 def llm(prompt, temperature=0.6):
     """Gemini free tier first, then any OpenAI-compatible free endpoint (Groq, OpenRouter). If all fail the caller
     skips the story (skip-on-failure: nothing is queued, the next scheduled run tries again)."""
@@ -221,6 +225,8 @@ def llm(prompt, temperature=0.6):
     gk = os.getenv("GEMINI_API_KEY")
     if gk:
         for model in os.getenv("GEMINI_MODELS", "gemini-flash-latest,gemini-2.5-flash,gemini-flash-lite-latest").split(","):
+          if model in _DEAD_MODELS:          # daily quota spent / model gone: don't burn ~50 s of back-off per call
+              continue
           for attempt in range(3):
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -235,11 +241,27 @@ def llm(prompt, temperature=0.6):
                                   "out": um.get("candidatesTokenCount"), "think": um.get("thoughtsTokenCount")}), flush=True)
                 return r["candidates"][0]["content"]["parts"][0]["text"]
             except Exception as ex:
+                detail = ""
+                if isinstance(ex, urllib.error.HTTPError):
+                    try:
+                        detail = ex.read().decode("utf-8", "replace")[:600]
+                    except Exception:
+                        detail = ""
+                msg = f"{ex} {detail}"
                 errs.append(f"gemini/{model}#{attempt}: {str(ex)[:100]}")
-                if any(c in str(ex) for c in ("503", "429", "500", "timed out")):
-                    time.sleep(8 * (attempt + 1))
+                code = getattr(ex, "code", None)
+                if code in (400, 403, 404) or (code == 429 and re.search(r"PerDay|per day|daily", detail, re.I)):
+                    _DEAD_MODELS[model] = f"HTTP {code}: {detail[:160]}"
+                    print(json.dumps({"llm_skip_model": model, "why": _DEAD_MODELS[model]}, ensure_ascii=False), flush=True)
+                    break
+                if any(c in msg for c in ("503", "429", "500", "timed out")):
+                    if attempt < 2:
+                        time.sleep(8 * (attempt + 1))
                     continue
                 break
+          else:   # three transient failures in a row: rest this model for the remainder of the run
+              _DEAD_MODELS[model] = "3 transient failures in a row: " + errs[-1][-120:]
+              print(json.dumps({"llm_skip_model": model, "why": _DEAD_MODELS[model]}, ensure_ascii=False), flush=True)
     for name, base, key_env, model_env, default in [
         ("groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "llama-3.3-70b-versatile"),
         ("openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "OPENROUTER_MODEL",
