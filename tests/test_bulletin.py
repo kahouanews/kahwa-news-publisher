@@ -240,13 +240,23 @@ def test_fit_title_trims_small_overruns_at_word_boundaries():
     assert t and plen(t) <= 22 and "[[" not in t and not t.endswith("في")
 
 
-def test_seg_from_accepts_slightly_long_title_after_fitting():
+def test_seg_from_keeps_titles_whole_up_to_the_hard_cap():
+    """Titles are never trimmed (a cut broke «الولايات المتحدة»); <= 26 accepted as written, longer rejected for a rewrite."""
     from kahwa_publisher.bulletin import writer as W
-    d = {"title": "البنك المركزي الأوروبي يثبّت", "tag": "اقتصاد", "headline": "المركزي الأوروبي [[يثبت الفائدة]]",
-         "strap": "أبقى البنك المركزي الأوروبي الفائدة دون تغيير", "brief": "تثبيت الفائدة الأوروبية",
-         "number": {"num": "2.5%", "label": "سعر الفائدة", "deck": "دون تغيير"}, "sources": []}
-    seg, _, _ = W.seg_from(d, "s1", "سعر الفائدة 2.5%")
-    assert W.plen(seg["title"]) <= W.LIM["title"]
+    base = {"tag": "اقتصاد", "headline": "المركزي الأوروبي [[يثبت الفائدة]]", "strap": "أبقى البنك المركزي الأوروبي الفائدة دون تغيير",
+            "brief": "تثبيت الفائدة الأوروبية", "number": {"num": "2.5%", "label": "سعر الفائدة", "deck": "دون تغيير"}, "sources": []}
+    t = "إيران والولايات المتحدة"
+    seg, _, _ = W.seg_from(dict(base, title=t), "s1", "سعر الفائدة 2.5%")
+    assert seg["title"] == t
+    with pytest.raises(ValueError, match="title too long"):
+        W.seg_from(dict(base, title="البنك المركزي الأوروبي يثبت الفائدة"), "s1", "سعر الفائدة 2.5%")
+
+
+def test_rail_titles_are_plain_text():
+    s = json.loads((ROOT / "tests/fixtures/bulletin-2026-10-29.json").read_text())
+    s["segments"][0]["title"] = "ضبط [[تماسيح]] بقطار"
+    B = RD.build(s)
+    assert B["segs"][0]["t"] == "ضبط تماسيح بقطار"
 
 
 def test_map_label_pill_stays_inside_safe_zone_cairo():

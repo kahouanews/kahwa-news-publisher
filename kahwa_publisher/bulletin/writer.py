@@ -64,7 +64,9 @@ BRIEF_PROMPT = """أنت محرر نشرة أخبار. اكتب الخبر ال�
 R.register(SEG_PROMPT, {"headline": str, "title": str})
 R.register(BRIEF_PROMPT, {"brief": str})
 
-LIM = {"title": 22, "tag": 12, "headline": 52, "strap": 58, "map_line": 58, "label": 30, "deck": 52, "qtext": 52, "who": 24,
+# title: the prompt asks for <= 16; 26 is the hard cap (bumper + rail shrink long titles to one line). Titles are never trimmed:
+# a word-boundary cut broke «الولايات المتحدة» (run 40960800162), and 22 dropped a whole story on 23 chars (run 40953097998).
+LIM = {"title": 26, "tag": 12, "headline": 52, "strap": 58, "map_line": 58, "label": 30, "deck": 52, "qtext": 52, "who": 24,
        "role": 30, "row": 50, "brief": 44, "place_label": 20}
 
 
@@ -170,10 +172,6 @@ def seg_from(d, key, src_text):
     """Writer JSON -> rundown SEG (+ list of on-screen lines). Optional parts that break a rule are dropped; required parts raise."""
     if d.get("safe") is False:
         raise ValueError("writer marked the story unsafe")
-    if (d.get("title") or "").strip() and plen(d["title"]) > LIM["title"]:
-        ft = fit_title(d["title"], LIM["title"])
-        if ft:
-            d = dict(d, title=ft)
     for k in ("title", "headline", "strap", "brief"):
         if not (d.get(k) or "").strip():
             raise ValueError(f"missing {k}")

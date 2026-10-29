@@ -254,7 +254,7 @@ def build(spec, mode="bulletin"):
             k["d"], k["words"] = rt(*txt, lead=lead)
         SC.append(k)
 
-    SEGS = [dict(k=g["key"], t=g["title"]) for g in segs_in]
+    SEGS = [dict(k=g["key"], t=re.sub(r"\[\[|\]\]", "", g["title"])) for g in segs_in]   # rail/summary: plain text, no [[ ]]
     if mode == "bulletin":
         SEGS.append(dict(k="brief", t="باختصار"))
         add(id="hl0", type="hltitle", d=2.6, title="أبرز العناوين", sub=date)
