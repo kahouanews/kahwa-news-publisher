@@ -23,6 +23,7 @@ from . import attribution as A
 DECOMPOSE = """أنت محلل تحقق في وكالة أنباء. فكّك النص التالي إلى ادعاءات واقعية ذرية: كل ادعاء جملة عربية قصيرة مستقلة فيها واقعة واحدة قابلة للتحقق (من/ماذا/أين/متى/كم/من قال ماذا).
 - غطِّ كل معلومة في النص: الأرقام، الأسماء، الأماكن، التواريخ، الصفات، التصريحات المنسوبة، النتائج والأسباب.
 - إذا نُسبت واقعة إلى جهة ("وفق ..."، "قالت ..."، "أعلنت ...") فاجعل الجهة جزءاً من الادعاء نفسه (مثال: "وزارة الصحة قالت إن 12 شخصاً توفوا").
+- النسبة العامة ("وفق وكالات"، "بحسب تقارير"، "بحسب تقارير إعلامية") ليست ادعاءً: احذفها من الادعاء واحتفظ بالواقعة فقط.
 - لا تُدرج: سطر "المصدر:" أو "المصادر:"، الوسوم (#)، اسم السلسلة قبل "|"، أسطر حقوق الصور.
 - check_worthy = true إذا كان الادعاء رقماً أو اسماً أو تصريحاً أو واقعة يمكن أن تكون خاطئة؛ false فقط للعبارات العامة جداً.
 أعد JSON فقط: {"claims": [{"id": 1, "claim": "...", "span": "الجزء من النص الذي جاء منه الادعاء حرفياً", "check_worthy": true}]}
@@ -34,7 +35,8 @@ VERIFY = """أنت مدقق حقائق صارم. لديك مصادر مرقمة 
 - supported: المصادر تقول ذلك صراحة (يُقبل اختلاف الصياغة لا اختلاف المعنى). يجب أن تنسخ في evidence عبارة من المصدر المذكور حرفياً كما هي (4 إلى 25 كلمة).
 - contradicted: المصادر تقول عكس ذلك أو رقماً/اسماً مختلفاً.
 - unsupported: غير موجود في المصادر، أو مبالغ فيه، أو أكثر تحديداً مما تقوله المصادر، أو استنتاج غير مذكور.
-- النسبة جزء من الادعاء: إذا قال الادعاء إن جهة ما (وزارة، شرطة، وكالة أنباء...) قالت شيئاً، فهو supported فقط إذا كانت المصادر تنسبه إلى الجهة نفسها.
+- النسبة جزء من الادعاء: إذا قال الادعاء إن جهة محددة (وزارة، شرطة، شركة، وكالة أنباء...) قالت شيئاً، فهو supported فقط إذا كانت المصادر تنسبه إلى الجهة نفسها.
+  أما النسبة العامة ("وفق وكالات"، "بحسب تقارير") فتجاهلها واحكم على الواقعة وحدها.
 أعد JSON فقط: {"results": [{"id": 1, "verdict": "supported|contradicted|unsupported", "source": رقم المصدر, "evidence": "اقتباس حرفي من ذلك المصدر", "note": "سبب قصير"}]}
 """
 
@@ -106,11 +108,16 @@ def _strip_for_claims(text):
     return "\n".join(keep)
 
 
+GENERIC_ATTR_RE = re.compile(r"\s*[(（]\s*(?:وفق|بحسب|حسب)\s+(?:وكالات|تقارير(?:\s+إعلامية)?|وسائل\s+إعلام)\s*[)）]|"
+                             r"[،,]?\s*(?:وفق|بحسب|حسب)\s+(?:وكالات|تقارير\s+إعلامية)(?=\s*[.\n،,]|$)")
+
+
 def check(llm, text, sources, require_attribution=False):
     """One decomposition + verification pass. Returns (claims_with_verdicts, bad_list).
     Attribution checks run in code on top of the LLM verdicts (an invented or outlet attribution is a bad claim)."""
     body = _strip_for_claims(text)
-    claims = _json(llm(DECOMPOSE + body, temperature=0.0)).get("claims") or []
+    # generic framing ("(وفق وكالات)", "بحسب تقارير إعلامية") is policy wording, not a claim: hide it from the LLM judge
+    claims = _json(llm(DECOMPOSE + GENERIC_ATTR_RE.sub("", body), temperature=0.0)).get("claims") or []
     claims = [c for c in claims if isinstance(c, dict) and (c.get("claim") or "").strip()]
     if not claims:
         raise ValueError("decomposition returned no claims")
