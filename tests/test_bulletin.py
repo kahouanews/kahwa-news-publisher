@@ -227,3 +227,23 @@ def test_spain_map_keeps_western_sahara_out_of_frame():
     m = RD.map_from_place({"iso3": "ESP", "lon": -3.72, "lat": 39.41, "label": "أوردا"})
     for k in ("s0", "s1"):
         assert not RD.visible_no_focus(m[k], isos=("ESH",))
+
+
+def test_fit_title_trims_small_overruns_at_word_boundaries():
+    from kahwa_publisher.bulletin.writer import fit_title, plen
+    assert fit_title("قرار البنك المركزي", 22) == "قرار البنك المركزي"
+    t = fit_title("البنك المركزي الأوروبي يثبت", 22)            # 27 chars -> word-boundary trim
+    assert t and plen(t) <= 22 and "البنك المركزي الأوروبي يثبت".startswith(t) and not t.endswith(" ")
+    assert fit_title("هجوم روسي على محطة قطار في", 22) == "هجوم روسي على محطة"   # no dangling particle
+    assert fit_title("كلمة " * 12, 22) is None                                   # big overrun: still rejected
+    t = fit_title("[[عاصفة]] سياسية في حكومة مدريد", 22)                      # markers dropped, fitted at a word
+    assert t and plen(t) <= 22 and "[[" not in t and not t.endswith("في")
+
+
+def test_seg_from_accepts_slightly_long_title_after_fitting():
+    from kahwa_publisher.bulletin import writer as W
+    d = {"title": "البنك المركزي الأوروبي يثبّت", "tag": "اقتصاد", "headline": "المركزي الأوروبي [[يثبت الفائدة]]",
+         "strap": "أبقى البنك المركزي الأوروبي الفائدة دون تغيير", "brief": "تثبيت الفائدة الأوروبية",
+         "number": {"num": "2.5%", "label": "سعر الفائدة", "deck": "دون تغيير"}, "sources": []}
+    seg, _, _ = W.seg_from(d, "s1", "سعر الفائدة 2.5%")
+    assert W.plen(seg["title"]) <= W.LIM["title"]

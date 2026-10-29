@@ -72,6 +72,25 @@ def plen(s):
     return len(re.sub(r"\[\[|\]\]", "", s or ""))
 
 
+_TAIL_PARTICLES = {"في", "من", "على", "إلى", "عن", "مع", "و", "بعد", "قبل", "بين", "عند", "حول", "ضد", "لـ", "بـ", "أو", "ثم"}
+
+
+def fit_title(t, lim, max_over=8):
+    """Short label (bumper title / edition title) -> fitted to `lim` chars at a word boundary, or None.
+    Only for small overruns (<= max_over): trailing words are dropped, never a word cut, never a dangling particle;
+    the fitted title is still screened and claim-verified with the other lines."""
+    t = re.sub(r"\s+", " ", (t or "").strip())
+    if plen(t) <= lim:
+        return t
+    if plen(t) > lim + max_over:
+        return None
+    words = re.sub(r"\[\[|\]\]", "", t).split(" ")
+    while words and (len(" ".join(words)) > lim or words[-1] in _TAIL_PARTICLES):
+        words.pop()
+    out = " ".join(words).strip(" .،,:-–…")
+    return out if len(out.split(" ")) >= 2 and plen(out) <= lim else None
+
+
 def log(o):
     print(json.dumps(o, ensure_ascii=False)[:1500], flush=True)
 
@@ -151,6 +170,10 @@ def seg_from(d, key, src_text):
     """Writer JSON -> rundown SEG (+ list of on-screen lines). Optional parts that break a rule are dropped; required parts raise."""
     if d.get("safe") is False:
         raise ValueError("writer marked the story unsafe")
+    if (d.get("title") or "").strip() and plen(d["title"]) > LIM["title"]:
+        ft = fit_title(d["title"], LIM["title"])
+        if ft:
+            d = dict(d, title=ft)
     for k in ("title", "headline", "strap", "brief"):
         if not (d.get(k) or "").strip():
             raise ValueError(f"missing {k}")
@@ -317,7 +340,7 @@ def build_spec(date, asof, n_main=5, n_brief=3, fetch_articles=True, mode="bulle
             if br:
                 pl = meta.get("place")
                 mp = RD.map_from_place(pl) if pl else None
-                seg = {"key": key, "title": br["t"][:18], "headline": meta["headline"], "shots": []}
+                seg = {"key": key, "title": fit_title(br["t"], 18, max_over=999) or br["t"][:18], "headline": meta["headline"], "shots": []}
                 if mp:
                     seg["map"] = mp
         else:
