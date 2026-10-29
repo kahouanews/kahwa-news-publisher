@@ -265,3 +265,21 @@ def test_map_label_pill_stays_inside_safe_zone_cairo():
     for k in ("s0", "s1"):
         p = RD.geo._ortho_forward(31.236, 30.044, m[k]["lon"], m[k]["lat"], m[k]["scale"], 540, m[k].get("cy", 560))
         assert p and p[1] - 96 >= 269 + 10, (k, p)
+
+
+def test_map_label_pill_clears_safe_sides_los_angeles():
+    """Run 40963351803: «لوس أنجلس» pill cut at the left edge (USA zoom from the mainland centre)."""
+    lab = "لوس أنجلس"
+    m = RD.map_from_place({"iso3": "USA", "lon": -118.244, "lat": 34.052, "label": lab})
+    half = 40 + 13 * len(lab)
+    for k in ("s0", "s1"):
+        p = RD.geo._ortho_forward(-118.244, 34.052, m[k]["lon"], m[k]["lat"], m[k]["scale"], 540, m[k].get("cy", 560))
+        assert p and 65 <= p[0] - half and p[0] + half <= 1015 and p[1] - 96 >= 279, (k, p)
+
+
+def test_duplicate_segments_are_detected():
+    a = {"title": "هجوم في دنيبرو", "map": {"iso3": "UKR", "point": {"lon": 35.046, "lat": 48.465}}}
+    b = {"title": "ضربة على محطة قطار", "map": {"iso3": "UKR", "point": {"lon": 35.0, "lat": 48.5}}}
+    c = {"title": "هجوم في [[دنيبرو]]"}
+    d = {"title": "ضربة في كييف", "map": {"iso3": "UKR", "point": {"lon": 30.52, "lat": 50.45}}}
+    assert W._dup_segment(b, [a]) and W._dup_segment(c, [a]) and not W._dup_segment(d, [a])

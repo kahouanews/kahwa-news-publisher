@@ -236,7 +236,7 @@
       const c = el("div", "h2 hl-text", p); textInto(c, s.text, t + 0.3);
       // two lines max (a 3rd line reaches the Meta action rail, y > 1152; run 40960800162): shrink long headlines
       const hlen = String(s.text).replace(/\[\[|\]\]/g, "").length;
-      c.style.fontSize = Math.min(64, Math.floor(2 * 860 / (hlen * 0.62))) + "px";
+      c.style.fontSize = Math.min(64, Math.floor(1760 / (hlen * 0.70))) + "px";   // 0.62 em/char still gave 3 lines (run 40963351803)
     } else if (s.type === "bumper") {
       const sc = scene(s.id, 9);
       el("div", "full", sc, null, { background: "var(--ink)" }); el("div", "glow", sc); el("div", "grain", sc);

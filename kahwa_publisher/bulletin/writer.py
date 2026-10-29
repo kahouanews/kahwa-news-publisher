@@ -9,6 +9,7 @@ dropped (fail closed); fewer than MIN_MAIN verified stories -> no bulletin today
 """
 import json
 import os
+import math
 import re
 
 from .. import attribution as A
@@ -322,6 +323,23 @@ def write_segment(writer, checker, c, key, fetch_articles=True, brief_only=False
     return None, None, {"error": last, "outlets": c["sources"]}
 
 
+def _dup_segment(seg, segs, km=25.0):
+    """Same story clustered twice (run 40963351803: two «هجوم في دنيبرو» segments, 13 vs 14 dead): identical plain title, or the
+    same country with story points within `km`."""
+    plain = lambda t: re.sub(r"\[\[|\]\]|\s+", "", t or "")
+    p = (seg.get("map") or {}).get("point")
+    for g in segs:
+        if plain(g["title"]) == plain(seg["title"]):
+            return True
+        q = (g.get("map") or {}).get("point")
+        if p and q and (seg.get("map") or {}).get("iso3") == (g.get("map") or {}).get("iso3"):
+            dlat = math.radians(q["lat"] - p["lat"])
+            dlon = math.radians(q["lon"] - p["lon"]) * math.cos(math.radians((p["lat"] + q["lat"]) / 2))
+            if 6371.0 * math.hypot(dlat, dlon) < km:
+                return True
+    return False
+
+
 def build_spec(date, asof, n_main=5, n_brief=3, fetch_articles=True, mode="bulletin"):
     """Pick, write and verify the day's stories. Returns (spec, report). Raises RundownError when too few stories verify."""
     writer = R.bound("writer")
@@ -343,6 +361,10 @@ def build_spec(date, asof, n_main=5, n_brief=3, fetch_articles=True, mode="bulle
                     seg["map"] = mp
         else:
             seg, br, meta = write_segment(writer, checker, c, key, fetch_articles)
+        if seg and _dup_segment(seg, segs):
+            log({"bulletin_story_duplicate": c["items"][0]["title"][:70], "title": seg["title"]})
+            meta = dict(meta, error="duplicate of an earlier segment (same title or same place)")
+            seg = None
         rep.append({"title": c["items"][0]["title"][:90], "ok": bool(seg), **{k: v for k, v in meta.items() if k != "place"}})
         used.add(c["key"])
         if seg:
