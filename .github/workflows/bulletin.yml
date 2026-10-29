@@ -1,0 +1,139 @@
+name: bulletin
+# Daily newscast «قهوة اليوم»: opener A «المدار» -> «أبرز العناوين» (every main segment) -> numbered segments with bumpers ->
+# «باختصار» -> sign-off. Voiceless. Stories = the newsroom's verified stories of the day (>= 2 outlets each, safety + banned-name
+# gates, LLM router for writing, claim verification by a different model family). Rendered on the CPU runner (HyperFrames
+# 0.8.214 + headless Chrome + ffmpeg); the globe plate of the opener is cached.
+# Safety: while the repo variable PUBLISHING_ENABLED != "true" (or dry_run / test_fixture) the run renders + QA's only and
+# uploads the MP4 as a workflow artifact; nothing is queued, nothing is hosted, nothing is published, state/ is untouched.
+on:
+  schedule:
+    - cron: "30 6 * * *"     # 06:30 UTC = 07:30 Algeria (the morning edition)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Render + QA only (no queue, no hosting)"
+        type: boolean
+        default: true
+      test_fixture:
+        description: "Render test only: saved rundown spec (e.g. tests/fixtures/bulletin-2026-10-29.json). No news fetch, no LLM, never queued"
+        type: string
+        default: ""
+permissions:
+  contents: write
+  issues: write
+concurrency:
+  group: bulletin
+  cancel-in-progress: false
+jobs:
+  bulletin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    env:
+      DO_NOT_TRACK: "1"
+      PYTHONUNBUFFERED: "1"
+      HYPERFRAMES_TELEMETRY: "0"
+      KAHWA_BUILD: /tmp/kahwa-bulletin
+      KAHWA_PLATE_CACHE: /home/runner/.cache/kahwa-plate
+      HF_WORKERS: "3"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip, cache-dependency-path: .github/workflows/bulletin.yml }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: System packages (ffmpeg)
+        run: |
+          if ! command -v ffmpeg >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null; fi
+          ffmpeg -version | head -1
+      - name: Python deps
+        run: pip install -q numpy opencv-python-headless "pillow>=10.1" soundfile pyloudnorm feedparser
+      - name: Cache HyperFrames (pinned 0.8.214) + Chrome Headless Shell
+        uses: actions/cache@v4
+        with:
+          path: |
+            kahwa_publisher/reels/node_modules
+            ~/.cache/hyperframes
+            ~/.cache/puppeteer
+          key: hf-0.8.214-${{ runner.os }}-${{ hashFiles('kahwa_publisher/reels/package.json') }}
+      - name: Cache the opener globe plate (depends only on globe.py + timing, not on the date)
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.cache/kahwa-plate
+          key: kahwa-plate-${{ hashFiles('kahwa_publisher/bulletin/opener/globe.py', 'kahwa_publisher/bulletin/opener/assets/*.jpg') }}
+      - name: Install HyperFrames + browser
+        run: |
+          test -x kahwa_publisher/reels/node_modules/.bin/hyperframes || npm install --prefix kahwa_publisher/reels --no-audit --no-fund --no-save
+          cd kahwa_publisher/reels
+          npx hyperframes --version
+          npx hyperframes telemetry disable || true
+          npx hyperframes browser ensure
+          echo "KAHWA_CHROME=$(npx hyperframes browser path | tail -1)" >> "$GITHUB_ENV"
+      - name: Make the bulletin
+        timeout-minutes: 70
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          LLM_QUOTA_FILE: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && 'out/llm_quota-bulletin-dry.json' || 'state/llm_quota-bulletin.json' }}
+          PUBLISHING_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && 'false' || vars.PUBLISHING_ENABLED }}
+          TEST_FIXTURE: ${{ github.event_name == 'workflow_dispatch' && inputs.test_fixture || '' }}
+        run: |
+          mkdir -p out
+          if [ -n "$TEST_FIXTURE" ]; then python -m kahwa_publisher.bulletin.make --out out --dry --fixture "$TEST_FIXTURE"
+          else python -m kahwa_publisher.bulletin.make --out out; fi
+      - name: Summary
+        if: always()
+        run: |
+          echo '### Kahwa «قهوة اليوم»' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          python -c "import json;d=json.load(open('out/summary.json'));print(json.dumps(d,ensure_ascii=False,indent=1)[:7000])" >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bulletin-${{ github.run_id }}
+          path: |
+            out/*.mp4
+            out/*.json
+            out/*.jpg
+            out/keyframes/
+            out/error.txt
+          retention-days: 5
+          if-no-files-found: ignore
+      - name: Host the MP4 on GitHub Pages (only when a queue item was produced)
+        if: success() && hashFiles('out/queue-item.json') != ''
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          set -e
+          F=$(ls out/*-bulletin.mp4 | head -1)
+          URL=$(bash tools/host_reel.sh "$F")
+          WANT=$(python -c "import json;print(json.load(open('out/queue-item.json'))['media'][0]['url'])")
+          [ "$URL" = "$WANT" ] || { echo "hosted URL $URL != queue URL $WANT"; exit 1; }
+      - name: Queue the bulletin for the dispatcher (publishes only while PUBLISHING_ENABLED=true)
+        if: success() && hashFiles('out/queue-item.json') != ''
+        run: |
+          ID=$(python -c "import json;print(json.load(open('out/queue-item.json'))['id'])")
+          mkdir -p queue && cp out/queue-item.json "queue/${ID}.json"
+          git config user.name "kahwa-bot"
+          git config user.email "kahwa-bot@users.noreply.github.com"
+          git add queue
+          git diff --cached --quiet || git commit -m "bulletin queued ${ID}"
+          ok=0; for i in 1 2 3 4; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; sleep 7; done; [ $ok = 1 ]
+      - name: Commit LLM quota usage (scheduled runs; nothing else)
+        if: always() && !(github.event_name == 'workflow_dispatch' && (inputs.dry_run || inputs.test_fixture != '')) && hashFiles('state/llm_quota-bulletin.json') != ''
+        run: |
+          git config user.name "kahwa-bot"
+          git config user.email "kahwa-bot@users.noreply.github.com"
+          git add state/llm_quota-bulletin.json
+          git diff --cached --quiet || git commit -m "bulletin llm quota $(date -u +%FT%TZ)"
+          ok=0; for i in 1 2 3 4; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; sleep 7; done; [ $ok = 1 ]
+      - name: Alert (GitHub issue = email) and skip
+        if: failure() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          { echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"; echo;
+            cat out/error.txt 2>/dev/null || echo "Bulletin job failed before the renderer wrote an error (see run log). Nothing was queued."; } > alert.txt
+          gh issue create --title "Kahwa bulletin alert $(date -u +%F' '%H:%M)" --body-file alert.txt || true

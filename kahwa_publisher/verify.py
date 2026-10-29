@@ -96,6 +96,34 @@ def numbers(t):
     return {n.replace(",", "").rstrip(".") for n in re.findall(r"\d[\d.,]*", t)}
 
 
+# Sources often spell small numbers out («بأربع طائرات», «ثلاثة قتلى», «عشرات»…): a claim that writes the digit must not be
+# rejected as "figures not in sources" (reel run 40929624756 failed on «3 مسيرات من أصل 4» vs «بأربع طائرات»).
+# Only the SOURCE side gets the word forms; claim numbers are still digits, so this can only accept a figure the source states.
+_AR_NUM_WORDS = {
+    "1": ["واحد", "واحدة"], "2": ["اثنان", "اثنين", "اثنتان", "اثنتين", "شخصان", "شخصين"],
+    "3": ["ثلاث", "ثلاثة"], "4": ["أربع", "اربع", "أربعة", "اربعة"], "5": ["خمس", "خمسة"], "6": ["ست", "ستة"],
+    "7": ["سبع", "سبعة"], "8": ["ثماني", "ثمانية", "ثمان"], "9": ["تسع", "تسعة"], "10": ["عشر", "عشرة"],
+    "11": ["أحد عشر", "إحدى عشرة"], "12": ["اثنا عشر", "اثني عشر", "اثنتا عشرة"], "20": ["عشرون", "عشرين"],
+    "30": ["ثلاثون", "ثلاثين"], "40": ["أربعون", "أربعين"], "50": ["خمسون", "خمسين"], "100": ["مئة", "مائة"],
+    "1000": ["ألف"],
+}
+_AR_NUM_RE = [(d, re.compile(r"(?<![\u0621-\u064A])(?:[وفبل]|ال|وال|بال)?(?:" + "|".join(map(re.escape, ws)) +
+                             r")(?:ة|ا)?(?![\u0621-\u064A])")) for d, ws in _AR_NUM_WORDS.items()]
+
+
+def source_numbers(t):
+    """Numbers stated in source text: digits plus small numbers spelled out in Arabic words."""
+    out = numbers(t)
+    flat = re.sub(r"[\u064B-\u0652\u0640]", "", t or "")
+    if re.search(r"(?:أحد|إحدى|اثنا|اثني|اثنتا) عشر", flat):
+        out.update(d for d, w in (("11", "أحد عشر"), ("11", "إحدى عشرة"), ("12", "اثنا عشر"), ("12", "اثني عشر"), ("12", "اثنتا عشرة")) if w in flat)
+    flat = re.sub(r"[\u0621-\u064A]+ عشرة?(?![\u0621-\u064A])", " ", flat)   # 13-19 («ستة عشر») is not 6 or 10
+    for d, rx in _AR_NUM_RE:
+        if rx.search(flat):
+            out.add(d)
+    return out
+
+
 SERIES_PREFIXES = ("فهم الخبر", "العالم في 30 ثانية", "بالأرقام", "#عاجل", "عاجل")
 
 
@@ -132,7 +160,7 @@ def check(llm, text, sources, require_attribution=False):
     res = _json(llm(VERIFY + "\nالمصادر:\n" + src_block + "\n\nالادعاءات:\n" + payload, temperature=0.0)).get("results") or []
     by_id = {r.get("id"): r for r in res if isinstance(r, dict)}
     all_src = " ".join(sources)
-    src_nums = numbers(all_src)
+    src_nums = source_numbers(all_src)
     bad = []
     for i, c in enumerate(claims):
         cid = c.get("id", i + 1)

@@ -1,0 +1,113 @@
+/* «قهوة اليوم» v2 body — additions over kahwa.css (reel tokens). Critical text lives in x 72-1008, y 276-1240.
+   Lower zone (y 1262-1900) carries only non-critical furniture ([data-nc]) over the continuing visual. */
+.layer { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; }
+#scenes { z-index: 2; } #rail { z-index: 4; } #chrome { z-index: 6; }
+bdi { direction: ltr; unicode-bidi: isolate; }
+.kw { margin: 0 0.14em; }
+
+/* visual window + blurred fill so the whole frame carries the picture */
+.photo.blurfill img { filter: blur(34px) brightness(0.42) saturate(0.75); transform: scale(1.18); }
+.pwin { position: absolute; left: 0; top: 370px; width: 1080px; height: 400px; overflow: hidden; border-bottom: 4px solid var(--red); }
+.pwin img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; filter: contrast(1.05) saturate(0.9); }
+.pcred { left: 72px; right: auto; font-size: 22px; max-width: 900px; background: rgba(9,11,16,0.72); }
+.archive { position: absolute; height: 44px; line-height: 44px; padding: 0 16px; font-size: 28px; font-weight: 800; color: #fff;
+  background: rgba(9,11,16,0.72); border: 2px solid var(--redText); white-space: nowrap; direction: rtl; }
+.lowfade { position: absolute; left: 0; top: 1180px; width: 1080px; height: 740px;
+  background: linear-gradient(180deg, rgba(9,11,16,0) 0px, rgba(9,11,16,0.55) 160px, rgba(9,11,16,0.62) 740px); }
+
+/* text panel (strap) y 800-1240 */
+.panel { position: absolute; left: 48px; right: 48px; top: 770px; height: 380px; background: rgba(12,15,22,0.93);
+  border-right: 12px solid var(--red); box-shadow: 0 24px 60px rgba(0,0,0,0.45); }
+.ptext { position: absolute; right: 40px; left: 40px; bottom: 96px; text-align: right; font-size: 70px; line-height: 1.36; font-weight: 800; }
+.src2 { position: absolute; right: 100px; top: 1092px; height: 46px; line-height: 46px; font-size: 28px; color: var(--muted);
+  padding: 0 14px; border-right: 4px solid var(--red); white-space: nowrap; z-index: 3; background: rgba(9,11,16,0.6); }
+.src2 span { color: #C9D0DC; font-weight: 700; }
+
+/* map pills */
+.pill.ghost { background: rgba(9,11,16,0.8); color: var(--text); font-size: 32px; font-weight: 700; padding: 6px 16px 4px; border: 1px solid rgba(242,244,247,0.4); }
+.pill.ghost i { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: #fff; margin-left: 10px; vertical-align: middle; }
+
+/* headlines */
+.hl-title { position: absolute; right: 72px; left: 72px; top: 640px; font-size: 128px; font-weight: 800; line-height: 1.2; text-align: right; }
+.hl-sub { position: absolute; right: 72px; top: 910px; font-size: 46px; font-weight: 700; color: #C9D0DC; }
+.hl-pre { position: absolute; right: 72px; top: 1030px; display: flex; flex-direction: row; gap: 16px; }
+.hl-pre-row { width: 84px; height: 84px; background: var(--panel); border: 2px solid var(--line); text-align: center; line-height: 88px;
+  font-family: "BarlowBI"; font-size: 54px; color: #fff; }
+.hl-pre-row b { font-weight: 900; }
+.hl-n { position: absolute; right: 40px; top: 30px; width: 96px; height: 96px; background: var(--red); color: #fff; font-family: "BarlowBI";
+  font-size: 68px; line-height: 102px; text-align: center; }
+.hl-text { position: absolute; right: 40px; left: 40px; top: 140px; font-size: 64px; line-height: 1.36; font-weight: 800; text-align: right; }
+.hl-price { position: absolute; left: 0; right: 0; top: 440px; text-align: center; direction: ltr; display: flex; justify-content: center; align-items: baseline; gap: 20px; }
+.hl-price .num { font-size: 260px; }
+.hl-price .punit { font-size: 110px; font-weight: 800; color: var(--muted); }
+.hl-price-lab { position: absolute; left: 72px; right: 72px; top: 700px; text-align: center; font-size: 44px; font-weight: 700; color: #C9D0DC; }
+.hl-arrow { position: absolute; left: 140px; top: 520px; font-size: 110px; color: var(--redText); }
+
+/* bumpers */
+.bstripe { position: absolute; top: -300px; left: 520px; width: 260px; height: 2600px; background: var(--red); transform: skewX(-14deg); opacity: 0.9; }
+.bnum { position: absolute; right: 72px; top: 520px; font-family: "BarlowBI"; font-size: 300px; line-height: 1; color: #fff; direction: ltr; }
+.btag { position: absolute; right: 72px; top: 860px; height: 58px; line-height: 58px; padding: 0 22px; background: #fff; color: var(--ink); font-weight: 800; font-size: 38px; }
+.btitle { position: absolute; right: 72px; left: 72px; top: 940px; font-size: 110px; font-weight: 800; line-height: 1.2; text-align: right; }
+.blogo { position: absolute; left: 72px; top: 300px; width: 152px; height: 58px; }
+.blogo img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+
+/* section titles + data cards */
+.sec-title { right: 72px; left: 72px; top: 400px; text-align: right; font-size: 74px; font-weight: 800; line-height: 1.3; }
+.gtile { position: absolute; width: 456px; height: 250px; background: rgba(14,17,25,0.94); border: 1px solid var(--line); border-top: 8px solid var(--red); }
+.gtile .gv { position: absolute; right: 32px; top: 30px; font-size: 130px; font-weight: 800; line-height: 1; direction: ltr; }
+.gtile .gl { position: absolute; right: 32px; left: 24px; top: 166px; font-size: 38px; font-weight: 700; color: #C9D0DC; line-height: 1.25; text-align: right; }
+.tl-line { position: absolute; right: 119px; top: 540px; width: 6px; height: 470px; background: var(--line); transform-origin: 50% 0%; }
+.tl-step { position: absolute; right: 72px; left: 72px; height: 200px; }
+.tl-dot { position: absolute; right: 0; top: 4px; width: 100px; height: 100px; background: var(--red); color: #fff; font-family: "BarlowBI";
+  font-size: 66px; line-height: 106px; text-align: center; }
+.tl-tx { position: absolute; right: 130px; left: 0; top: 0; font-size: 56px; font-weight: 800; line-height: 1.34; text-align: right; }
+.qmark { position: absolute; left: 30px; top: -128px; font-size: 150px; opacity: 0.9; font-weight: 800; color: var(--red); line-height: 1; font-family: Georgia, serif; }
+.qtext { position: absolute; right: 40px; left: 40px; top: 46px; font-size: 66px; line-height: 1.36; font-weight: 800; text-align: right; }
+.qwho { position: absolute; right: 40px; top: 262px; font-size: 36px; color: #C9D0DC; font-weight: 400; }
+.qwho b { color: #fff; font-weight: 800; }
+.nx-row { position: absolute; right: 72px; left: 72px; height: 168px; background: rgba(14,17,25,0.9); border: 1px solid var(--line); }
+.nx-i { position: absolute; right: 26px; top: 22px; width: 76px; height: 76px; background: var(--red); color: #fff; font-family: "BarlowBI"; font-size: 52px; line-height: 82px; text-align: center; }
+.nx-tx { position: absolute; right: 128px; left: 30px; top: 16px; font-size: 50px; font-weight: 800; line-height: 1.34; text-align: right; }
+.numblock2 { position: absolute; right: 40px; left: 40px; top: 30px; text-align: right; }
+.numblock2 .num { font-size: 150px; }
+.numlabel { font-size: 58px; font-weight: 800; line-height: 1.25; margin-top: 4px; }
+.numdeck { font-size: 44px; font-weight: 700; color: #C9D0DC; line-height: 1.35; margin-top: 12px; }
+.pricecard { position: absolute; right: 72px; left: 72px; top: 410px; text-align: right; }
+.plab { font-size: 60px; font-weight: 800; }
+.prow { display: flex; flex-direction: row; align-items: baseline; gap: 24px; margin-top: 18px; }
+.prow .num { font-size: 210px; }
+.punit { font-size: 56px; font-weight: 800; color: var(--muted); }
+.pdelta { display: inline-flex; align-items: center; gap: 14px; margin-top: 18px; font-size: 56px; font-weight: 800; color: var(--redText);
+  background: rgba(220,24,12,0.12); padding: 6px 18px; direction: rtl; }
+.pdelta .arrow { font-size: 44px; }
+.pasof { font-size: 34px; color: var(--muted); font-weight: 700; margin-top: 14px; }
+svg.spark { position: absolute; left: 72px; top: 870px; width: 936px; height: 170px; }
+.sparklab { position: absolute; top: 1046px; font-size: 30px; font-weight: 700; color: #C9D0DC; }
+.sparklab.r { right: 72px; } .sparklab.l { left: 72px; }
+.bar-row2 { position: absolute; right: 72px; left: 72px; height: 190px; }
+.bar-row2 .bl { position: absolute; right: 0; top: 0; font-size: 46px; font-weight: 800; color: var(--text); }
+.bar-row2 .track { position: absolute; right: 0; left: 0; top: 72px; height: 100px; background: rgba(42,49,66,0.45); }
+.bar-row2 .fill { position: absolute; right: 0; top: 0; bottom: 0; background: #59647C; transform-origin: 100% 50%; }
+.bar-row2.key .fill { background: var(--red); }
+.bar-row2 .bv { position: absolute; left: 20px; top: 0; height: 100px; line-height: 100px; font-weight: 800; font-size: 60px; direction: ltr; color: #fff; }
+.bar-note { position: absolute; left: 72px; top: 620px; font-size: 30px; color: var(--muted); font-weight: 700; }
+.rtile2 { position: absolute; width: 456px; height: 160px; background: rgba(14,17,25,0.94); border: 1px solid var(--line); border-right: 10px solid var(--red); }
+.rtile2 .rv { position: absolute; right: 26px; top: 14px; font-size: 64px; font-weight: 800; direction: ltr; line-height: 1; }
+.rtile2 .rl { position: absolute; right: 26px; top: 82px; font-size: 34px; font-weight: 800; }
+.rtile2 .rs { position: absolute; right: 26px; top: 122px; font-size: 24px; font-weight: 700; color: #C9D0DC; }
+.lrow2 { position: absolute; right: 72px; left: 72px; min-height: 220px; padding-right: 110px; }
+.lrow2 .li { position: absolute; right: 0; top: 4px; width: 84px; height: 84px; background: var(--red); color: #fff; font-family: "BarlowBI"; font-size: 58px; line-height: 88px; text-align: center; }
+.lrow2 .ltx { font-size: 56px; font-weight: 800; line-height: 1.32; }
+.ls2 { font-size: 28px; font-weight: 700; color: var(--muted); margin-top: 10px; }
+.endline .chk { display: inline-block; width: 52px; height: 52px; border-radius: 50%; background: var(--red); color: #fff; text-align: center; line-height: 54px; font-size: 34px; margin-left: 10px; }
+.endline.credits { font-size: 24px; color: var(--muted); line-height: 1.5; }
+
+/* lower zone: rundown rail (non-critical) */
+.rundown { position: absolute; left: 72px; right: 72px; top: 1290px; }
+.rd-head { display: flex; flex-direction: row; justify-content: space-between; align-items: center; height: 56px; border-bottom: 3px solid var(--red); margin-bottom: 12px; }
+.rd-title { font-size: 34px; font-weight: 800; color: #fff; }
+.rd-asof { font-size: 26px; font-weight: 700; color: var(--muted); }
+.rd-row { height: 56px; margin-bottom: 8px; display: flex; flex-direction: row; align-items: center; gap: 18px; padding: 0 18px;
+  background: rgba(14,17,25,0.72); color: #C9D0DC; font-size: 32px; font-weight: 700; }
+.rd-n { font-family: "BarlowBI"; font-size: 30px; width: 46px; }
+.rd-date { margin-top: 16px; font-size: 26px; font-weight: 700; color: var(--muted); }

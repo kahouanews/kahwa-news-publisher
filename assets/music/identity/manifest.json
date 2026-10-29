@@ -1,0 +1,142 @@
+{
+ "identity": "global",
+ "name": "Global (world-broadcast: orchestra + electronic pulse, Lydian-lift logo)",
+ "bpm": 118,
+ "files": {
+  "sting": {
+   "file": "sting.mp3",
+   "wav": "sting.wav",
+   "hit_s": 0.01,
+   "qa": {
+    "lufs": -14.0,
+    "true_peak_dbtp": -2.5,
+    "clipped_samples": 0,
+    "dur_s": 4.328
+   }
+  },
+  "sting_outro": {
+   "file": "sting-outro.mp3",
+   "wav": "sting-outro.wav",
+   "hit_s": 0.009,
+   "qa": {
+    "lufs": -14.0,
+    "true_peak_dbtp": -2.46,
+    "clipped_samples": 0,
+    "dur_s": 3.997
+   }
+  },
+  "breaking": {
+   "file": "bed-breaking.mp3",
+   "wav": "bed-breaking.wav",
+   "bpm": 118,
+   "loop_s": 24.4068,
+   "bars": 12,
+   "edit_points_s": [
+    0.0,
+    8.1356,
+    16.2712,
+    24.4068
+   ],
+   "qa": {
+    "lufs": -14.01,
+    "true_peak_dbtp": -2.4,
+    "clipped_samples": 0,
+    "dur_s": 24.407,
+    "seam_jump": 0.03267,
+    "p99_step": 0.104,
+    "seam_rms_ratio_db": 7.63
+   }
+  },
+  "explainer": {
+   "file": "bed-explainer.mp3",
+   "wav": "bed-explainer.wav",
+   "bpm": 118,
+   "loop_s": 32.5424,
+   "bars": 16,
+   "edit_points_s": [
+    0.0,
+    8.1356,
+    16.2712,
+    24.4068,
+    32.5424
+   ],
+   "qa": {
+    "lufs": -14.01,
+    "true_peak_dbtp": -2.4,
+    "clipped_samples": 0,
+    "dur_s": 32.542,
+    "seam_jump": 0.06893,
+    "p99_step": 0.07359,
+    "seam_rms_ratio_db": 4.08
+   }
+  },
+  "light": {
+   "file": "bed-light.mp3",
+   "wav": "bed-light.wav",
+   "bpm": 118,
+   "loop_s": 24.4068,
+   "bars": 12,
+   "edit_points_s": [
+    0.0,
+    8.1356,
+    16.2712,
+    24.4068
+   ],
+   "qa": {
+    "lufs": -14.01,
+    "true_peak_dbtp": -2.4,
+    "clipped_samples": 0,
+    "dur_s": 24.407,
+    "seam_jump": 0.01896,
+    "p99_step": 0.10409,
+    "seam_rms_ratio_db": 0.61
+   }
+  },
+  "calm": {
+   "file": "bed-calm.mp3",
+   "wav": "bed-calm.wav",
+   "bpm": 118,
+   "loop_s": 32.5424,
+   "bars": 16,
+   "edit_points_s": [
+    0.0,
+    8.1356,
+    16.2712,
+    24.4068,
+    32.5424
+   ],
+   "qa": {
+    "lufs": -14.01,
+    "true_peak_dbtp": -2.4,
+    "clipped_samples": 0,
+    "dur_s": 32.542,
+    "seam_jump": 0.01309,
+    "p99_step": 0.05573,
+    "seam_rms_ratio_db": 0.75
+   }
+  }
+ },
+ "render_audit": {
+  "scope": "all pitched parts (VSCO via sfizz + Surge XT), every note-on, from qa_global.py",
+  "notes_checked": 2140,
+  "dead_notes": 0
+ },
+ "logo": {
+  "notes": "D4 A4 G#4 E5 D5",
+  "midi": [
+   62,
+   69,
+   68,
+   76,
+   74
+  ],
+  "intervals": [
+   7,
+   -1,
+   8,
+   -2
+  ],
+  "harmony": "D5 -> E/D (G#) -> D major",
+  "bpm": 118
+ }
+}

@@ -109,6 +109,10 @@ def verify_reel(S, style, summary, checker=None):
     return bad
 
 
+class Rejected(RuntimeError):
+    """Editorial fail-closed outcome (claims not supported by the sources): the story is skipped, not a job failure."""
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="out")
@@ -161,7 +165,7 @@ def main():
                     dropped = True                     # unverifiable image caption / ticker: drop it, re-verify the rest
                     continue
                 if attempt == 2:
-                    raise RuntimeError(f"claim verification failed, reel NOT made: {bad[:3]}")
+                    raise Rejected(f"claim verification failed, reel NOT made: {bad[:3]}")
                 hint = ("هذه الأسطر غير مدعومة بالمصادر، احذفها أو اكتبها بما تقوله المصادر حرفياً فقط: " +
                         " | ".join(b["claim"] for b in bad[:6]))
                 log({"reel_verify_retry": bad[:6]})
@@ -190,7 +194,7 @@ def main():
         if a.story and S.get("source_texts"):          # local renders of a saved story are verified too
             bad = verify_reel(S, style, summary)
             if bad:
-                raise RuntimeError(f"claim verification failed, reel NOT made: {bad[:3]}")
+                raise Rejected(f"claim verification failed, reel NOT made: {bad[:3]}")
         gate(S)
         (out / "story.json").write_text(json.dumps(S, ensure_ascii=False, indent=1))
         mp4 = out / f"{S['id']}-reel.mp4"
@@ -200,6 +204,28 @@ def main():
                        t_total_s=round(time.time() - t0, 1))
         if res["problems"]:
             raise RuntimeError(f"QA failed, reel NOT queued: {res['problems']}")
+        # Concept B alert sting «عاجل» (stings/policy.py): only a top-tier style-B story (urgent, >= 2 outlets incl. a tier-1
+        # outlet), max 1/day and 3/week, never right after an edition reel. STING_TEST=1 forces it on dry runs (render test only).
+        from ..stings import policy as SP
+        sting_state = SP.load()
+        force = dry and os.getenv("STING_TEST", "") == "1"
+        ok_alert, why_alert = SP.alert_allowed(sting_state, style == "B" and bool(S.get("urgent")), (c or {}).get("sources") or [])
+        summary["alert_sting"] = {"used": False, "policy": why_alert, "forced_test": force}
+        if style == "B" and (ok_alert or force):
+            from ..bulletin import render as RN
+            pt = ((S.get("location") or {}).get("point")) or {}
+            ll = [[pt["lon"], pt["lat"]]] if "lon" in pt and "lat" in pt else None
+            sb = build / "alert-sting"
+            hhmm = datetime.now(timezone.utc).strftime("%H:%M")
+            t_st, mixw = RN.sting("X", sb / "sting-X.mp4", sb, hhmm, a.workers, pings_ll=ll)
+            tmp = build / "with-sting.mp4"
+            RN.prepend_sting(sb / "sting-X.mp4", mixw, mp4, tmp, sb / "work")
+            q2 = RN.qa_file(tmp)
+            if q2["problems"]:
+                raise RuntimeError(f"QA failed after the alert sting, reel NOT queued: {q2['problems']}")
+            import shutil as _sh
+            _sh.copy(tmp, mp4)
+            summary["alert_sting"].update(used=True, render_s=t_st, qa=q2)
         if not dry and c is not None:
             url = MEDIA_BASE + mp4.name
             now = datetime.now(timezone.utc)
@@ -210,6 +236,8 @@ def main():
                     "not_before": (now + timedelta(minutes=45)).strftime("%Y-%m-%dT%H:%M:%S+00:00"), "style": style}
             (out / "queue-item.json").write_text(json.dumps(item, ensure_ascii=False, indent=1))
             mark_reeled(seen, c)
+            SP.record(sting_state, "alert" if summary["alert_sting"]["used"] else "reel", item["id"])
+            SP.save(sting_state)
             summary["queued_as"] = item["id"]
         summary["result"] = "ok (dry run: not queued)" if dry else "ok"
         (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1))
@@ -217,6 +245,20 @@ def main():
         return 0
     except R.Hold as ex:              # quota exhausted / no independent checker: hold, nothing made, exit 0
         summary["result"] = f"held: {str(ex)[:400]}"
+        (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1))
+        log(summary)
+        return 0
+    except Rejected as ex:
+        # 2026-10-29 (run 40929624756): a story whose claims stay unsupported after the retries is an editorial skip, not a
+        # broken pipeline: exit 0, no alert issue/email. On scheduled runs the story is marked as reeled so the next slot
+        # picks a different story instead of rewriting the same one.
+        summary["result"] = "skipped: " + str(ex)[:600]
+        if not dry and c is not None and seen is not None:
+            try:
+                from ..newsroom import mark_reeled
+                mark_reeled(seen, c)
+            except Exception:
+                pass
         (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1))
         log(summary)
         return 0

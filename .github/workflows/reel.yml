@@ -1,11 +1,19 @@
 name: reel
 # One verified story -> HyperFrames reel (style A explainer, style B if urgent) -> queue as kind "reel".
 # Replaces the old Pillow reel path (kahwa_publisher/reel.py, retired 2026-10-29).
+# Concept B stings (2026-10-29, kahwa_publisher/stings/policy.py): the 08:11/14:11 UTC slots make an edition reel «العالم في 30 ثانية»
+# (edition sting 3.56 s + 3 verified headlines, real story locations as dots, body music = bars 1-4 of bed-breaking, <= 60 s,
+# ends on a fade); a style-B single-story reel gets the «عاجل» alert sting only when the story is top-tier (>= 2 outlets incl.
+# a tier-1 outlet), max 1/day and 3/week, never right after an edition reel. Counts in state/stings.json (scheduled runs only).
+# Fix 2026-10-29 (run 40929624756): an editorial fail-closed verdict (claims unsupported after the retries) is now a skip
+# (exit 0, no alert email) and spelled-out source numbers count; the quota commit no longer dies on the npm-rewritten
+# package.json (npm install --no-save, git pull --rebase --autostash, and the push loop now fails loudly).
 # Safety: while the repo variable PUBLISHING_ENABLED != "true" (or dry_run is ticked) the run renders + QA's only and
 # uploads the MP4 as a workflow artifact; nothing is queued, nothing is published. A broken reel is never queued.
 on:
   schedule:
     - cron: "41 11,17 * * *"   # 12:41 and 18:41 Algeria (the existing reel slots, after the 11:13/17:13 newsroom runs)
+    - cron: "11 8,14 * * *"    # 09:11 and 15:11 Algeria: edition reels «العالم في 30 ثانية» (multi-headline, edition sting)
   workflow_dispatch:
     inputs:
       dry_run:
@@ -18,6 +26,23 @@ on:
         default: false
       test_story:
         description: "Render test only: path of a saved story fixture (e.g. tests/fixtures/reel-map-tunisia.json). No news fetch, no LLM, never queued"
+        type: string
+        default: ""
+      mode:
+        description: "single = one-story reel; edition = «العالم في 30 ثانية» multi-headline reel with the edition sting"
+        type: choice
+        options: [single, edition]
+        default: single
+      style:
+        description: "Render tests with test_story only: force style A or B (empty = from the story)"
+        type: string
+        default: ""
+      sting_test:
+        description: "Dry runs only: force the «عاجل» alert sting on a style-B reel (render test, never queued)"
+        type: boolean
+        default: false
+      edition_fixture:
+        description: "Edition render test only: saved rundown spec (e.g. tests/fixtures/bulletin-2026-10-29.json). Never queued"
         type: string
         default: ""
 permissions:
@@ -36,6 +61,7 @@ jobs:
       HYPERFRAMES_TELEMETRY: "0"
       KAHWA_BUILD: /tmp/kahwa-reel
       HF_WORKERS: "3"
+      MODE: ${{ (github.event_name == 'schedule' && github.event.schedule == '11 8,14 * * *') && 'edition' || (github.event_name == 'workflow_dispatch' && inputs.mode) || 'single' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,7 +73,7 @@ jobs:
           if ! command -v ffmpeg >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null; fi
           ffmpeg -version | head -1
       - name: Python deps
-        run: pip install -q numpy opencv-python-headless "pillow>=10.1" pyloudnorm feedparser
+        run: pip install -q numpy opencv-python-headless "pillow>=10.1" pyloudnorm feedparser soundfile
       - name: Cache HyperFrames (pinned 0.8.214) + Chrome Headless Shell
         uses: actions/cache@v4
         with:
@@ -58,12 +84,13 @@ jobs:
           key: hf-0.8.214-${{ runner.os }}-${{ hashFiles('kahwa_publisher/reels/package.json') }}
       - name: Install HyperFrames + browser
         run: |
-          test -x kahwa_publisher/reels/node_modules/.bin/hyperframes || npm install --prefix kahwa_publisher/reels --no-audit --no-fund --save-exact
+          # --no-save: npm must not rewrite package.json (a modified tracked file broke "git pull --rebase" in run 40929624756)
+          test -x kahwa_publisher/reels/node_modules/.bin/hyperframes || npm install --prefix kahwa_publisher/reels --no-audit --no-fund --no-save
           cd kahwa_publisher/reels
           npx hyperframes --version
           npx hyperframes telemetry disable || true
           npx hyperframes browser ensure
-          npx hyperframes browser path
+          echo "KAHWA_CHROME=$(npx hyperframes browser path | tail -1)" >> "$GITHUB_ENV"
       - name: Make reel
         id: make
         timeout-minutes: 30
@@ -79,9 +106,17 @@ jobs:
           # one-line switch (repo variable): "library" = assets/music ACE-Step tracks, "synth" = code-synthesised bed
           MUSIC_SOURCE: ${{ vars.MUSIC_SOURCE || 'library' }}
           TEST_STORY: ${{ github.event_name == 'workflow_dispatch' && inputs.test_story || '' }}
+          STYLE: ${{ github.event_name == 'workflow_dispatch' && inputs.style || '' }}
+          STING_TEST: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run && inputs.sting_test) && '1' || '' }}
+          EDITION_FIXTURE: ${{ github.event_name == 'workflow_dispatch' && inputs.edition_fixture || '' }}
         run: |
           start=$(date +%s)
-          if [ -n "$TEST_STORY" ]; then python -m kahwa_publisher.reels.make --out out --dry --story "$TEST_STORY"
+          mkdir -p out
+          ST=""; [ -n "$STYLE" ] && ST="--style $STYLE"
+          if [ "$MODE" = "edition" ]; then
+            if [ -n "$EDITION_FIXTURE" ]; then python -m kahwa_publisher.bulletin.make --mode edition --out out --dry --fixture "$EDITION_FIXTURE"
+            else python -m kahwa_publisher.bulletin.make --mode edition --out out; fi
+          elif [ -n "$TEST_STORY" ]; then python -m kahwa_publisher.reels.make --out out --dry --story "$TEST_STORY" $ST
           else python -m kahwa_publisher.reels.make --out out; fi
           echo "seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
       - name: Summary
@@ -98,6 +133,8 @@ jobs:
           path: |
             out/*.mp4
             out/*.json
+            out/*.jpg
+            out/keyframes/
             out/error.txt
           retention-days: 5
           if-no-files-found: ignore
@@ -140,9 +177,10 @@ jobs:
           mkdir -p queue && cp out/queue-item.json "queue/${ID}.json"
           git config user.name "kahwa-bot"
           git config user.email "kahwa-bot@users.noreply.github.com"
-          git add queue state/reels_seen.json state/llm_quota-reel.json
+          git add queue
+          for f in state/reels_seen.json state/llm_quota-reel.json state/stings.json; do [ -f "$f" ] && git add "$f"; done
           git diff --cached --quiet || git commit -m "reel queued ${ID}"
-          for i in 1 2 3 4; do git pull --rebase -q && git push -q && break; sleep 7; done
+          ok=0; for i in 1 2 3 4; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; sleep 7; done; [ $ok = 1 ]
       - name: Commit LLM quota usage (scheduled runs; nothing else)
         if: always() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) && hashFiles('state/llm_quota-reel.json') != ''
         run: |
@@ -150,7 +188,7 @@ jobs:
           git config user.email "kahwa-bot@users.noreply.github.com"
           git add state/llm_quota-reel.json
           git diff --cached --quiet || git commit -m "reel llm quota $(date -u +%FT%TZ)"
-          for i in 1 2 3 4; do git pull --rebase -q && git push -q && break; sleep 7; done
+          ok=0; for i in 1 2 3 4; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; sleep 7; done; [ $ok = 1 ]
       - name: Alert (GitHub issue = email) and skip
         # manual dry-run tests fail loudly in the run itself but do not open an issue/email
         if: failure() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)

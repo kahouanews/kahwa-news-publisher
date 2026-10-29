@@ -1,0 +1,89 @@
+/* v4 copy of work/opener/src/templates/opener.css: .handoff moved from top 1168px to 1010px (out of the Meta action rail, y>1152 x>853). */
+/* Kahwa News opener — 1080x1920, RTL, Almarai (Arabic) + Barlow Black Italic (logo only). */
+@font-face { font-family: "Almarai"; src: url("Almarai-Regular.ttf"); font-weight: 400; font-display: block; }
+@font-face { font-family: "Almarai"; src: url("Almarai-Bold.ttf"); font-weight: 700; font-display: block; }
+@font-face { font-family: "Almarai"; src: url("Almarai-ExtraBold.ttf"); font-weight: 800; font-display: block; }
+@font-face { font-family: "BarlowBI"; src: url("Barlow-BlackItalic.ttf"); font-weight: 900; font-display: block; }
+
+:root { --navy: #0A101C; --ink: #070B14; --text: #F2F4F7; --muted: #A9B3C6; --red: #DC180C; --redHi: #FF3B2E; --line: rgba(242,244,247,0.22); }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--navy); }
+#root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--navy);
+  font-family: "Almarai", sans-serif; color: var(--text); direction: rtl; letter-spacing: 0; }
+#stage, .full { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; }
+.abs { position: absolute; }
+video.plate { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; object-fit: cover; }
+.grain { position: absolute; inset: 0; background-image: url("grain.png"); background-size: 512px 512px; opacity: 0.05; mix-blend-mode: overlay; pointer-events: none; }
+.vig { position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 80% 62% at 50% 46%, rgba(7,11,20,0) 55%, rgba(7,11,20,0.55) 100%); }
+
+/* ---------- shared lockup (end frame identical in A and B) ---------- */
+.logo { position: absolute; left: 230px; top: 372px; width: 620px; height: 237px; }
+.logo .lyr { position: absolute; inset: 0; }
+.logo img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.logo .wm { clip-path: inset(0 0 44% 0); }            /* wordmark lives above the band line */
+.logo .wm img { will-change: transform; }
+.logo .sweep { position: absolute; inset: 0; -webkit-mask-image: url("logo-kahwa.svg"); mask-image: url("logo-kahwa.svg");
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%;
+  background: linear-gradient(105deg, rgba(255,255,255,0) 40%, rgba(255,255,255,0.95) 50%, rgba(255,255,255,0) 60%);
+  background-size: 300% 100%; background-position: 100% 0; mix-blend-mode: screen; opacity: 0; }
+.logo .bandglow { position: absolute; left: 0; top: 0; width: 100%; height: 100%; filter: blur(18px); opacity: 0; }
+
+.title { position: absolute; left: 0; width: 1080px; top: 636px; height: 170px; display: flex; justify-content: center;
+  align-items: center; gap: 30px; font-weight: 800; font-size: 128px; line-height: 170px; white-space: nowrap;
+  text-shadow: 0 6px 40px rgba(0,0,0,0.55); }
+.title .w { display: inline-block; will-change: transform, opacity, filter; }
+
+.daterow { position: absolute; left: 0; width: 1080px; top: 838px; height: 70px; display: flex; justify-content: center;
+  align-items: center; gap: 22px; white-space: nowrap; }
+.chip { height: 70px; display: flex; align-items: center; padding: 0 26px; font-weight: 700; font-size: 42px; line-height: 70px; }
+.chip.date { background: rgba(10,16,28,0.72); border: 1.5px solid var(--line); color: var(--text); }
+.chip.time { background: var(--red); color: #fff; font-weight: 800; gap: 14px; }
+.chip.time .tz { font-weight: 700; font-size: 28px; opacity: 0.92; }
+.digits { display: inline-flex; direction: ltr; unicode-bidi: isolate; }
+.digits .d { display: inline-block; width: 0.62em; text-align: center; }
+.digits .c { display: inline-block; width: 0.32em; text-align: center; }
+
+.handoff { position: absolute; right: 72px; left: 72px; top: 1010px; height: 64px; display: flex; align-items: center; gap: 18px; }
+.handoff .tab { flex: 0 0 auto; height: 64px; padding: 0 24px; background: var(--text); color: var(--navy);
+  font-weight: 800; font-size: 36px; line-height: 64px; white-space: nowrap; }
+.handoff .rule { flex: 1 1 auto; height: 4px; background: var(--red); transform-origin: 100% 50%; }
+
+/* ---------- concept A: HUD + tagline ---------- */
+.bracket { position: absolute; width: 56px; height: 56px; border-color: rgba(242,244,247,0.55); border-style: solid; border-width: 0; }
+.bracket.tr { right: 56px; top: 250px; border-top-width: 3px; border-right-width: 3px; }
+.bracket.tl { left: 56px; top: 250px; border-top-width: 3px; border-left-width: 3px; }
+.bracket.br { right: 56px; top: 1286px; border-bottom-width: 3px; border-right-width: 3px; }
+.bracket.bl { left: 56px; top: 1286px; border-bottom-width: 3px; border-left-width: 3px; }
+.hud { position: absolute; top: 300px; height: 48px; font-weight: 700; font-size: 32px; line-height: 48px; color: var(--muted); white-space: nowrap; }
+.hud.l { left: 84px; } .hud.r { right: 84px; }
+.hud .dot { display: inline-block; width: 12px; height: 12px; border-radius: 6px; background: var(--red); margin-left: 12px; vertical-align: 4px; }
+.tagline { position: absolute; left: 0; width: 1080px; top: 560px; height: 140px; display: flex; justify-content: center; gap: 28px;
+  font-weight: 800; font-size: 104px; line-height: 140px; white-space: nowrap; text-shadow: 0 8px 50px rgba(0,0,0,0.6); }
+.tagline .w { display: inline-block; }
+.tagline .w.accent { color: var(--redHi); }
+.preline { position: absolute; left: 72px; right: 72px; top: 553px; height: 6px; background: var(--red); transform-origin: 100% 50%;
+  box-shadow: 0 0 24px rgba(220,24,12,0.9); }
+.flash { position: absolute; inset: 0; background: radial-gradient(ellipse 60% 22% at 50% 26%, rgba(255,255,255,0.85), rgba(255,255,255,0) 70%); opacity: 0; mix-blend-mode: screen; }
+
+/* ---------- concept B: grid, dot world, clock ---------- */
+.bgB { position: absolute; inset: 0;
+  background: radial-gradient(ellipse 90% 45% at 50% 78%, #13213B 0%, #0A101C 60%, #060A12 100%); }
+.beam { position: absolute; left: -200px; top: 980px; width: 1480px; height: 520px; opacity: 0;
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, rgba(80,130,255,0.22), rgba(80,130,255,0) 70%); }
+.gridv { position: absolute; top: 250px; width: 1.5px; height: 1440px; background: linear-gradient(180deg, rgba(242,244,247,0), rgba(242,244,247,0.16) 15%, rgba(242,244,247,0.16) 85%, rgba(242,244,247,0)); transform-origin: 50% 0; }
+.gridh { position: absolute; left: 0; width: 1080px; height: 1.5px; background: linear-gradient(270deg, rgba(242,244,247,0), rgba(242,244,247,0.16) 12%, rgba(242,244,247,0.16) 88%, rgba(242,244,247,0)); transform-origin: 100% 50%; }
+.persp { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; perspective: 1300px; perspective-origin: 540px 640px; }
+.plane { position: absolute; left: -793px; top: 960px; width: 2400px; height: 880px; transform-origin: 1333px 100%; transform-style: preserve-3d; }
+.plane img { position: absolute; left: 0; top: 0; width: 2400px; height: 880px; }
+.plane .reveal { position: absolute; inset: 0; }
+.plane .scan { position: absolute; inset: 0; background: var(--redHi); -webkit-mask-image: url("dots_lit.png"); -webkit-mask-size: 100% 100%; opacity: 0.95; }
+.plane .scanwrap { position: absolute; inset: 0; }
+.ping { position: absolute; width: 0; height: 0; }
+.ping .core { position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; border-radius: 9px; background: var(--redHi); box-shadow: 0 0 22px 6px rgba(255,59,46,0.7); }
+.ping .ring { position: absolute; left: -40px; top: -40px; width: 80px; height: 80px; border-radius: 40px; border: 4px solid var(--redHi); }
+.clock { position: absolute; left: 0; width: 1080px; top: 470px; height: 300px; display: flex; justify-content: center;
+  font-weight: 800; font-size: 250px; line-height: 300px; color: var(--text); white-space: nowrap; text-shadow: 0 10px 60px rgba(0,0,0,0.5); }
+.clocklab { position: absolute; left: 0; width: 1080px; top: 410px; height: 56px; text-align: center; font-weight: 700; font-size: 36px; line-height: 56px; color: var(--muted); }
+.clocklab .dot { display: inline-block; width: 12px; height: 12px; border-radius: 6px; background: var(--red); margin-left: 12px; vertical-align: 4px; }
+.redbar { position: absolute; left: 0; width: 1080px; top: 508px; height: 96px; background: var(--red); transform-origin: 100% 50%; box-shadow: 0 0 40px rgba(220,24,12,0.6); }

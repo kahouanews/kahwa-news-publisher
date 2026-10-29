@@ -127,6 +127,30 @@ Each task has its own chain (override per run with env `LLM_CHAIN_<TASK>`, comma
 
 - Why not: IFM's own cards say to always use `reasoning_effort=high` with ≥32K output tokens — impossible on a CPU runner (medium already takes ~12 min per call); the only feasible setting (low) failed our structural gate on its first story, and the fail-closed verifier would then have to be the same small model (a post needs ~6 LLM calls ≈ 7+ minutes plus a 3.2 GB download per run). Licence is fine (Apache-2.0 on every model card; note the repos carry no LICENSE file). Publishing nothing beats publishing an unverified post. Re-run the bench when a stronger small Arabic model ships.
 
+## Daily newscast «قهوة اليوم» (2026-10-29, `kahwa_publisher/bulletin/`, workflow `bulletin.yml`)
+- Structure (owner-approved pilot v4): opener A «المدار» (`bulletin/opener/`, NASA Blue/Black Marble globe, plate cached) →
+  «أبرز العناوين» with one headline per main segment in bulletin order (permanent gate `rundown.check_headlines`) → 3–5
+  numbered segments, each opened by a bumper → «باختصار» → sign-off. Voiceless, no verification card, music = global identity
+  (`assets/music/identity`, CC0 samples, own composition).
+- Stories: `bulletin/writer.py` picks the day's stories (≥ 2 outlets each, newsroom legal/sports/banned filters, graphic gate,
+  LLM classifier), writes each segment through the LLM router (task writer), drops any line with a number not in the sources,
+  a banned name, a competing outlet or graphic wording, and verifies every on-screen line with a fact-checker of another model
+  family (fail closed: the story is dropped; fewer than 3 verified stories → no bulletin that day, exit 0).
+- Maps never centre on a no-focus shape (MAR/DZA/ARE/ISR/merged PSE) and zoom in until no labelled no-focus country is in
+  frame when the story point allows it (Yemen maps show no «الإمارات»).
+- QA before queueing: screen gate, DOM safe-zone QA (`bulletin/qa.mjs`: Meta 9:16 safe zone, action rail, overflow, overlaps,
+  banned names, map-label rules), file QA (1080×1920, yuv420p, −14 LUFS, TP ≤ −1 dBTP, full decode), frame #0 = opener.
+- Daily 06:30 UTC; dry/fixture runs upload the MP4 as an artifact only; a queue item (kind `video`) is written only on a
+  scheduled run with `PUBLISHING_ENABLED=true`. Test: Actions → bulletin → Run workflow (dry_run, optional test_fixture
+  `tests/fixtures/bulletin-2026-10-29.json`).
+
+## Concept B stings (`kahwa_publisher/stings/`, rules in `stings/policy.py`)
+- Edition sting «العالم في 30 ثانية» (3.56 s) opens the multi-headline edition reel (reel.yml slots 08:11/14:11 UTC, max 4/day):
+  sting with real story lon/lat as dots (no labels, no borders) → 3 verified headlines → fade; body music = bars 1–4 of
+  bed-breaking; ≤ 60 s.
+- Alert sting «عاجل» (3.05 s) in front of a style-B reel only for top-tier stories (urgent, ≥ 2 outlets incl. a tier-1 outlet),
+  max 1/day and 3/week, never within 3 h after an edition reel. Counts in `state/stings.json` (scheduled runs only).
+
 ## Testing without publishing
 
 - `newsroom.yml` → *Run workflow* (`dry_run` default **true**): writes posts + cards + full verification reports to the artifact `newsroom-dry-<run id>`; `queue/`, `state/`, `media/` untouched.

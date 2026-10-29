@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-resolution="portrait">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1080, height=1920" />
+<title>Kahwa News opener __CONCEPT__</title>
+<script src="gsap.min.js"></script>
+<script src="CustomEase.min.js"></script>
+<link rel="stylesheet" href="opener.css" />
+</head>
+<body>
+<div id="root" class="concept-__CONCEPT__" data-composition-id="main" data-start="0" data-duration="__DURATION__" data-width="1080" data-height="1920" data-fps="30">
+__PLATE__
+<div id="stage"></div>
+</div>
+<script>window.OPENER = __OPENER_JSON__;</script>
+<script src="opener.js"></script>
+<script>
+  window.__timelines = window.__timelines || {};
+  window.__timelines["main"] = window.OPENER_TL;
+</script>
+</body>
+</html>
