@@ -128,6 +128,6 @@ def test_banned_country_text_ban_unchanged():
 
 def test_newsroom_selection_uses_gate_and_no_war_ban():
     src = (Path(__file__).resolve().parents[1] / "kahwa_publisher/newsroom.py").read_text()
-    assert "safety.keyword_ok(c)" in src and "safety.classify(llm, cands)" in src and "safety.output_hits(" in src
+    assert "safety.keyword_ok(c)" in src and "safety.classify(R.bound(\"classifier\"), cands)" in src and "safety.output_hits(" in src
     assert "WAR_WORDS" not in src and "ممنوع منعاً باتاً أي خبر عن حرب" not in src
     assert "safety.is_conflict(blob)" in src                   # war story -> no photo

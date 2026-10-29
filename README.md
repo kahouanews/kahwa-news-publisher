@@ -82,7 +82,37 @@ Loki / OpenFactVerification-style, using the same free Gemini models:
 4. Card text (headline, title, subline, facts, numbers, quote) is verified separately without repair; reels verify every on-screen line plus the caption.
 Any LLM/parse error, an empty claim list, or a remaining unsupported claim = nothing is queued. The repaired text re-passes every hard gate (banned countries, sports, bait, 7-gram copy check, structure).
 
-## Fallback writer (if Gemini fails) — decision 2026-10-29: not wired in, skip-on-failure
+## LLM layer (2026-10-29): per-task free-model router — `kahwa_publisher/llm.py`
+
+Each task has its own chain (override per run with env `LLM_CHAIN_<TASK>`, comma list `provider:model`):
+
+| task | chain |
+|---|---|
+| writer | `gemini-3.8-flash` → `gemini-3.6-flash` → `gemini-3.1-flash-lite` → `gemma-4-31b-it` → `gemini-3.5-flash-lite` |
+| classifier | `gemma-4-26b-a4b-it` → `gemini-3.5-flash-lite` → `gemma-4-31b-it` → `gemini-3.1-flash-lite` |
+| utility (reel line shortening) | `gemma-4-31b-it` → `gemma-4-26b-a4b-it` → `gemini-3.1-flash-lite` → `gemini-3.5-flash-lite` |
+| factcheck (claim decomposition, verification, repair, CHECK pass) | Groq `qwen/qwen3.8-27b` → SambaNova `DeepSeek-V3.2` → `DeepSeek-V3.1` → OpenRouter `nvidia/nemotron-3-ultra-550b-a55b:free` → `nvidia/nemotron-3.5-super-vl:free` → Groq `openai/gpt-oss-120b` → (Cloudflare, Google models) |
+
+- **Family rule:** the fact-checker is never the writer's model family (Gemma = Google). No independent checker with a key + quota
+  → the story is **held** (not queued, not marked seen) and the next run retries. Never published unverified. A preflight check holds
+  the whole run before any quota is spent.
+- Keys from env (GitHub secrets): `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `SAMBANOVA_API_KEY`,
+  `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`; a provider without a key is skipped. SambaNova free key expires ~2027-01-29
+  (watchdog opens an issue from 14 days before; repo variable `KEY_EXPIRIES`).
+- Free limits used for budgeting: Gemini 3.8/3.6 Flash 20 RPD, 3.1 Flash-Lite 500 RPD, Gemma 4 14,400 RPD (~15K TPM); Groq qwen3.8-27b
+  and gpt-oss-120b 1,000 RPD / 8K TPM / 200K TPD (qwen also 1K output tokens/min, so max_tokens shrinks and calls are paced);
+  SambaNova DeepSeek 20 RPD each (16K context on free); OpenRouter :free 50 requests/day for the account. Unknown limits are learned
+  from 429 details.
+- Quota state: `state/llm_quota-newsroom.json` / `state/llm_quota-reel.json` (one file per workflow, committed by the bot, summed on
+  read; days follow the provider reset clock, Gemini = midnight Pacific). Per-run cap = ceil(daily limit / `LLM_RUNS_PER_DAY` (11) ×
+  `LLM_BURST` (1.5)).
+- Circuit breaker: 404 / deprecated / "not available" → model dead 3 days (persisted); daily 429 → exhausted until reset (persisted);
+  401/403 → provider off for the run; 3 transient failures → model rests for the run.
+- Strict JSON (schema per prompt, one repair try on the same model) and a code-only Arabic quality check on writer / repair output
+  before fact-check. Quota exhaustion never fails a workflow (exit 0, logged as `held`).
+- `python -m kahwa_publisher.llm --list-models --status --probe gemini:gemma-4-31b-it,...` (runs on manual newsroom dispatches).
+
+## Fallback writer history (superseded by the LLM router above)
 
 - Order today: Gemini `gemini-3.8-flash` → `gemini-3.6-flash` → `gemini-flash-latest` → `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite` → `gemini-flash-lite-latest` (all on the free tier, each with its own daily quota; `gemini-2.5-flash` was dropped: it now answers 404 "no longer available to new users") → Groq / OpenRouter (only if those secrets are ever added). Override with env `GEMINI_MODELS`. A per-run circuit breaker skips a model for the rest of the run after a daily-quota 429, a 4xx, or 3 transient failures in a row (each skip is logged as `llm_skip_model`), so a spent model no longer costs ~50 s of back-off per call. If every model fails, the run writes nothing and the next scheduled run tries again.
 - Benchmarked (`llm-fallback-bench.yml`, run 40802385273, llama.cpp b11972 prebuilt CPU, GitHub runner 4 vCPU, real newsroom prompt for a live two-outlet story):

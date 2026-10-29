@@ -32,6 +32,7 @@ from . import signals
 from . import safety
 from . import attribution as A
 from .dispatcher import QUEUE, ROOT
+from . import llm as R
 from .verify import check as verify_check, verify_text
 
 SERIES_NUMBERS = "بالأرقام"
@@ -232,75 +233,23 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 """
 
 
-# Gemini API free tier, Oct 2026 (ai.google.dev/gemini-api/docs/models + pricing): 3.8 Flash, 3.6 Flash, 3.5 Flash-Lite and
-# 3.1 Flash-Lite are free, each with its own daily quota; 2.5 models answer 404 "no longer available to new users".
-GEMINI_CHAIN = "gemini-3.8-flash,gemini-3.6-flash,gemini-flash-latest,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest"
-_DEAD_MODELS = {}   # per-run circuit breaker: model -> reason (daily quota exhausted, 4xx)
+# LLM layer (2026-10-29): kahwa_publisher/llm.py routes every task to its own free-model chain (writer / classifier /
+# factcheck / utility), tracks quota per provider + model in state/, and holds a story (never publishes it unverified)
+# when no fact-checker from a different model family than the writer is available.
+def llm(prompt, temperature=0.6, task="writer"):
+    """Back-compat entry point (reels, bench): one routed call, returns the validated JSON text. Raises R.Hold."""
+    return R.llm(prompt, temperature, task=task)
 
 
-def llm(prompt, temperature=0.6):
-    """Gemini free tier first, then any OpenAI-compatible free endpoint (Groq, OpenRouter). If all fail the caller
-    skips the story (skip-on-failure: nothing is queued, the next scheduled run tries again)."""
-    errs = []
-    gk = os.getenv("GEMINI_API_KEY")
-    if gk:
-        for model in os.getenv("GEMINI_MODELS", GEMINI_CHAIN).split(","):
-          if model in _DEAD_MODELS:          # daily quota spent / model gone: don't burn ~50 s of back-off per call
-              continue
-          for attempt in range(3):
-            try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-                body = {"contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {"temperature": temperature, "responseMimeType": "application/json"}}
-                req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
-                                             headers={"Content-Type": "application/json", "x-goog-api-key": gk})
-                t_call = time.time()
-                r = json.loads(urllib.request.urlopen(req, timeout=90).read())
-                um = r.get("usageMetadata") or {}
-                print(json.dumps({"llm": f"gemini/{model}", "s": round(time.time() - t_call, 1), "in": um.get("promptTokenCount"),
-                                  "out": um.get("candidatesTokenCount"), "think": um.get("thoughtsTokenCount")}), flush=True)
-                return r["candidates"][0]["content"]["parts"][0]["text"]
-            except Exception as ex:
-                detail = ""
-                if isinstance(ex, urllib.error.HTTPError):
-                    try:
-                        detail = ex.read().decode("utf-8", "replace")[:600]
-                    except Exception:
-                        detail = ""
-                msg = f"{ex} {detail}"
-                errs.append(f"gemini/{model}#{attempt}: {str(ex)[:100]}")
-                code = getattr(ex, "code", None)
-                if code in (400, 403, 404) or (code == 429 and re.search(r"PerDay|per day|daily", detail, re.I)):
-                    _DEAD_MODELS[model] = f"HTTP {code}: {detail[:160]}"
-                    print(json.dumps({"llm_skip_model": model, "why": _DEAD_MODELS[model]}, ensure_ascii=False), flush=True)
-                    break
-                if any(c in msg for c in ("503", "429", "500", "timed out")):
-                    if attempt < 2:
-                        time.sleep(8 * (attempt + 1))
-                    continue
-                break
-          else:   # three transient failures in a row: rest this model for the remainder of the run
-              _DEAD_MODELS[model] = "3 transient failures in a row: " + errs[-1][-120:]
-              print(json.dumps({"llm_skip_model": model, "why": _DEAD_MODELS[model]}, ensure_ascii=False), flush=True)
-    for name, base, key_env, model_env, default in [
-        ("groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "llama-3.3-70b-versatile"),
-        ("openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "OPENROUTER_MODEL",
-         "meta-llama/llama-3.3-70b-instruct:free"),
-    ]:
-        k = os.getenv(key_env)
-        if not k:
-            continue
-        try:
-            body = {"model": os.getenv(model_env, default), "temperature": temperature,
-                    "response_format": {"type": "json_object"},
-                    "messages": [{"role": "user", "content": prompt}]}
-            req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode(), method="POST",
-                                         headers={"Content-Type": "application/json", "Authorization": f"Bearer {k}"})
-            r = json.loads(urllib.request.urlopen(req, timeout=90).read())
-            return r["choices"][0]["message"]["content"]
-        except Exception as ex:
-            errs.append(f"{name}: {str(ex)[:120]}")
-    raise RuntimeError("all LLMs failed: " + " | ".join(errs) if errs else "no LLM key configured")
+def writer_quality(d):
+    """Cheap Arabic quality gate on the writer's JSON before anything goes to the fact-checker."""
+    if not d.get("safe", False):
+        return []                                    # unsafe stories are dropped by the caller anyway
+    probs = R.arabic_quality(d.get("post") or "", min_len=120)
+    for k in ("headline", "title", "subline"):
+        if isinstance(d.get(k), str) and d[k].strip():
+            probs += [f"{k}: {x}" for x in R.arabic_quality(d[k], min_len=4) if "Latin" not in x]
+    return probs
 
 
 CHECK = """أنت مدقق حقائق صارم في وكالة أنباء دولية. قارن كل جملة في المنشور بالمصادر.
@@ -310,6 +259,10 @@ CHECK = """أنت مدقق حقائق صارم في وكالة أنباء دول
 أعد JSON فقط: {"ok": true/false, "problems": ["..."], "corrected_post": "المنشور بعد التصحيح بنفس البنية إن لزم", "corrected_headline": "العنوان بعد التصحيح إن لزم"}"""
 
 
+R.register(PROMPT, {"safe": bool})
+R.register(CHECK, {"ok": bool}, lambda d: [] if d.get("ok") else
+           R.arabic_quality(d.get("corrected_post") or "", min_len=120) if (d.get("corrected_post") or "").strip() else [])
+
 CARD_FIELDS = ("headline", "title", "subline", "kicker", "quote", "speaker", "role", "highlight", "subject")
 
 
@@ -317,9 +270,12 @@ def write_post(c):
     # outlet names are hidden from the writer: sources are labelled [م1], [م2] … (the outlet list stays internal)
     items = c["items"][:6]
     src = "\n".join(f"- [م{n + 1}] {i['title']} — {i['summary'][:400]}" for n, i in enumerate(items))
-    raw = llm(PROMPT + src)
-    raw = raw[raw.find("{"): raw.rfind("}") + 1]
+    raw, wmeta = R.complete("writer", PROMPT + src, 0.6, validate=writer_quality)
     d = json.loads(raw)
+    d["_writer"] = str(wmeta)
+    # fact-check / verification must come from a DIFFERENT model family than the writer (Gemma is Google too);
+    # if none has a key + quota, R.Hold propagates: the story is held for the next run, never published unverified
+    checker = R.bound("factcheck", exclude_families={wmeta.family})
     post = re.sub(r"https?://\S+|www\.\S+", "", d.get("post", "")).strip()
     post = A.sanitize(A.strip_source_lines(post))                   # "بحسب قناة X" -> "بحسب تقارير إعلامية"
     for k in CARD_FIELDS:
@@ -342,7 +298,7 @@ def write_post(c):
         print(json.dumps({"qa_reason": "graphic/gore wording in output", "hits": vh[:5]}, ensure_ascii=False))
         return None
     # fact-check pass: a second, independent read compares every claim with the sources
-    chk = llm(CHECK + "\n\nالمصادر:\n" + src + "\n\nالمنشور:\n" + post)
+    chk = checker(CHECK + "\n\nالمصادر:\n" + src + "\n\nالمنشور:\n" + post, temperature=0.2)
     chk = json.loads(chk[chk.find("{"): chk.rfind("}") + 1])
     if not chk.get("ok"):
         fixed = (chk.get("corrected_post") or "").strip()
@@ -374,7 +330,7 @@ def write_post(c):
         post = f"{SERIES_NUMBERS} | {subj}\n" + re.sub(r"^#عاجل \| ", "", post)
     # ---- second verification layer: atomic claims vs source texts (fail closed)
     sources = [f"[م{n + 1}] {i['title']} — {i['summary'][:600]}" for n, i in enumerate(items)]
-    v = verify_text(llm, post, sources, kind="post", require_attribution=True)
+    v = verify_text(checker, post, sources, kind="post", require_attribution=True)
     if not v:
         print(json.dumps({"qa_reason": "claim verification failed"}))
         return None
@@ -389,7 +345,9 @@ def write_post(c):
     card_text = "\n".join(x.strip() for x in card_lines if isinstance(x, str) and x.strip())
     if card_text:
         try:
-            _claims, bad = verify_check(llm, card_text, sources)
+            _claims, bad = verify_check(checker, card_text, sources)
+        except R.Hold:
+            raise
         except Exception as ex:
             print(json.dumps({"qa_reason": f"card verification error (fail closed): {str(ex)[:120]}"}))
             return None
@@ -422,6 +380,7 @@ def write_post(c):
         return None
     post = A.set_source_line(post, line)
     d["verification"] = v["report"]
+    d["verification"]["models"] = {"writer": d.pop("_writer", ""), "checker": sorted(set(checker.models))}
     d["post"] = post
     blob = post + " " + (d.get("headline") or "") + " " + (d.get("title") or "")
     d["no_photo"] = sum(w in blob for w in VIOLENT) >= 1 or safety.is_conflict(blob)   # war story -> own visual, no photo
@@ -534,7 +493,7 @@ def pick_reel_cluster(min_sources=2):
         cands.append(c)
         if len(cands) >= 8:
             break
-    allowed = safety.classify(llm, cands) if cands else {}       # Gemini category check, fail closed
+    allowed = safety.classify(R.bound("classifier"), cands) if cands else {}   # LLM category check, fail closed
     for c in cands:
         if allowed.get(c["key"]):
             return c, seen
@@ -561,6 +520,11 @@ def main():
     if queued >= int(os.getenv("MAX_QUEUE", "6")) and not x.dry:
         print(json.dumps({"skip": "queue full", "queued": queued}))
         return 0
+    ok, why = R.preflight()
+    print(json.dumps({"llm_preflight": ok, "detail": why}, ensure_ascii=False), flush=True)
+    if not ok and not x.dry:          # no writer, or no independent fact-checker: hold everything, spend no quota
+        print(json.dumps({"held": why}, ensure_ascii=False))
+        return 0
     seen = load_seen()
     clusters = cluster(fetch())
     if os.getenv("SIGNALS", "on").lower() != "off":
@@ -585,7 +549,7 @@ def main():
         if len(cands) >= 10:
             break
     try:
-        allowed = safety.classify(llm, cands) if cands else {}    # Gemini category check, fail closed
+        allowed = safety.classify(R.bound("classifier"), cands) if cands else {}    # LLM category check, fail closed
     except Exception as ex:
         print(json.dumps({"safety_classify_error": str(ex)[:200]}))
         allowed = {}
@@ -597,6 +561,9 @@ def main():
         tried += 1
         try:
             d = write_post(c)
+        except R.Hold as ex:          # quota exhausted / no independent checker: not marked seen, next run retries
+            print(json.dumps({"held": str(ex)[:400], "title": c["items"][0]["title"][:90]}, ensure_ascii=False))
+            break
         except Exception as ex:
             print(json.dumps({"llm_error": str(ex)[:300]}))
             break
@@ -646,4 +613,8 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except R.Hold as ex:              # quota exhaustion never fails the workflow
+        print(json.dumps({"held": str(ex)[:400]}, ensure_ascii=False))
+        raise SystemExit(0)

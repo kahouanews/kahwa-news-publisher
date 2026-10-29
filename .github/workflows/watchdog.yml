@@ -14,6 +14,24 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: python -m kahwa_publisher.dispatcher watchdog || true
+      - name: API key expiry reminder (one issue per key, from 14 days before expiry)
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          # NAME=YYYY-MM-DD list; SambaNova free key created 2026-10-29 expires after ~3 months
+          KEY_EXPIRIES: ${{ vars.KEY_EXPIRIES || 'SAMBANOVA_API_KEY=2027-01-29' }}
+        run: |
+          for kv in $KEY_EXPIRIES; do
+            name=${kv%%=*}; exp=${kv##*=}
+            left=$(( ( $(date -ud "$exp" +%s) - $(date -u +%s) ) / 86400 ))
+            [ "$left" -gt 14 ] && continue
+            title="Kahwa: $name expires $exp"
+            if gh issue list --state open --search "$title in:title" --json number --jq 'length' | grep -qx 0; then
+              printf '%s\n' "The $name API key expires on $exp ($left days left)." \
+                "Create a new free key, update the GitHub Actions secret $name, then update the repo variable KEY_EXPIRIES." \
+                "Until then the LLM router skips the provider cleanly (fact-checks fall to the next independent model)." > key.txt
+              gh issue create --title "$title" --body-file key.txt || true
+            fi
+          done
       - name: Alert
         if: hashFiles('state/ALERT.txt') != ''
         env: { GH_TOKEN: "${{ github.token }}" }

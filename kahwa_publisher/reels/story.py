@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .. import attribution as A
 from .. import geo
+from .. import llm as R
 from .. import safety
 from .render import ASSETS, BANNED_ISO, banned_hits
 
@@ -418,10 +419,27 @@ def drop_unverifiable_captions(S, problems, log=print):
     return True
 
 
-def write_story(llm, items, outlets, sid, fetch_articles=True, log=print, hint=None, src=None):
+def story_quality(d):
+    """Cheap Arabic quality gate on the reel writer's JSON (code only) before the fact-checker sees it."""
+    if not d.get("safe", False):
+        return []
+    txt = " ".join(str(d.get(k) or "") for k in ("headline", "deck", "where_line"))
+    txt += " " + " ".join(str(f.get("text") or "") for f in (d.get("facts") or []) if isinstance(f, dict))
+    return [p for p in R.arabic_quality(re.sub(r"[\[\]]", "", txt), min_len=40) if "Latin" not in p]
+
+
+R.register(PROMPT, {"safe": bool}, story_quality)
+R.register(CHECK, {"ok": bool})
+R.register(SHORTEN, {"lines": list})
+
+
+def write_story(llm, items, outlets, sid, fetch_articles=True, log=print, hint=None, src=None, checker=None, shortener=None):
     """Run the LLM (one retry with the validator's complaint) and return (story, source_text).
     hint: complaint from a previous rejected story (e.g. unsupported claims) to correct on the first attempt.
-    Overlong lines are shortened (shorten_fields) and unverifiable decorative captions dropped before a rewrite is asked."""
+    Overlong lines are shortened (shorten_fields) and unverifiable decorative captions dropped before a rewrite is asked.
+    checker: fact-check callable (router: a different model family than the writer); shortener: cheap utility model."""
+    checker = checker or llm
+    shortener = shortener or llm
     src = src or source_block(items, fetch_articles)
     err = hint
     for attempt in range(3):
@@ -432,11 +450,11 @@ def write_story(llm, items, outlets, sid, fetch_articles=True, log=print, hint=N
             d = json.loads(raw)
             if not d.get("safe", False):
                 raise StoryError("llm marked unsafe")
-            d = shorten_fields(llm, d, log=log)
+            d = shorten_fields(shortener, d, log=log)
             S = build_story(d, items, src, sid, outlets)
-            ok, problems = fact_check(llm, S, src)
+            ok, problems = fact_check(checker, S, src)
             if not ok and drop_unverifiable_captions(S, problems, log=log):
-                ok, problems = fact_check(llm, S, src)              # re-check what is left (fail closed)
+                ok, problems = fact_check(checker, S, src)              # re-check what is left (fail closed)
             if not ok:
                 raise StoryError("fact-check: " + " | ".join(problems))
             S["source_texts"] = src[:12000]

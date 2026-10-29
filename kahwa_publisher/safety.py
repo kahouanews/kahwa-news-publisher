@@ -156,6 +156,11 @@ CLASSIFY = """أنت محرر معايير في صفحة أخبار عالمية
 الأخبار:
 """
 REJECT_CATS = {"sports"}
+try:
+    from . import llm as _R
+    _R.register(CLASSIFY, {"stories": list})
+except Exception:   # pragma: no cover
+    pass
 FLAGS = ("graphic", "propaganda", "unverified", "needs_banned_country")
 
 

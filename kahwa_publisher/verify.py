@@ -19,6 +19,7 @@ import json
 import re
 
 from . import attribution as A
+from . import llm as R
 
 DECOMPOSE = """أنت محلل تحقق في وكالة أنباء. فكّك النص التالي إلى ادعاءات واقعية ذرية: كل ادعاء جملة عربية قصيرة مستقلة فيها واقعة واحدة قابلة للتحقق (من/ماذا/أين/متى/كم/من قال ماذا).
 - غطِّ كل معلومة في النص: الأرقام، الأسماء، الأماكن، التواريخ، الصفات، التصريحات المنسوبة، النتائج والأسباب.
@@ -48,6 +49,11 @@ REPAIR = """أنت محرر أول. النص التالي يحتوي ادعاء�
   إن لم تذكر المصادر الجهة فاكتب "بحسب تقارير". لا تنسب شيئاً لجهة لا تذكرها المصادر، ولا تذكر أبداً أي قناة أو موقع إخباري أو صحيفة.
 أعد JSON فقط: {"text": "النص المصحح كاملاً"}
 """
+
+
+R.register(DECOMPOSE, {"claims": list})
+R.register(VERIFY, {"results": list})
+R.register(REPAIR, {"text": str}, lambda d: R.arabic_quality(d.get("text") or "", min_len=40))
 
 
 def _json(raw):
@@ -177,6 +183,10 @@ def verify_text(llm, text, sources, kind="post", log=print, require_attribution=
         report["checked_claims"] = [{k: c.get(k) for k in ("claim", "check_worthy", "source", "evidence")} for c in claims]
         log(json.dumps({"verify": {k: report[k] for k in ("kind", "rounds", "result")}}, ensure_ascii=False))
         return {"text": text, "report": report}
+    except R.Hold:                       # no independent checker / quota: hold (caller keeps the story for the next run)
+        report["result"] = "held: no fact-checker available"
+        log(json.dumps({"verify": report}, ensure_ascii=False))
+        raise
     except Exception as ex:
         report["result"] = f"rejected (fail closed): {type(ex).__name__}: {str(ex)[:200]}"
         log(json.dumps({"verify": report}, ensure_ascii=False))

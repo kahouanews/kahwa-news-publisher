@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import attribution as A
+from .. import llm as R
 from .. import safety
 from . import media as M
 from .render import gate, render_story
@@ -87,11 +88,11 @@ def reel_text_lines(S, style):
     return [plain(x).strip() for x in out if isinstance(x, str) and x.strip()]
 
 
-def verify_reel(S, style, summary):
+def verify_reel(S, style, summary, checker=None):
     """Second verification layer on everything the viewer reads (on-screen lines + caption). Returns the unsupported
     claims ([] = all supported). Fail closed: an LLM/parse error raises, so the reel is not made."""
-    from ..newsroom import llm as _llm
     from ..verify import check as vcheck
+    _llm = checker or R.bound("factcheck")
     if not S.get("source_texts"):
         raise RuntimeError("no source texts to verify against")
     srcs = [p.strip() for p in re.split(r"\n(?=- \[)", S["source_texts"]) if p.strip()]
@@ -130,7 +131,16 @@ def main():
             media_root = Path(a.story).resolve().parent
             seen = c = None
         else:
-            from ..newsroom import llm, mark_reeled, pick_reel_cluster
+            from ..newsroom import mark_reeled, pick_reel_cluster
+            ok, why = R.preflight()
+            log({"llm_preflight": ok, "detail": why})
+            if not ok:                # no writer or no independent fact-checker: hold, spend no quota, exit 0
+                summary["result"] = f"held: {why}"
+                (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1))
+                return 0
+            writer = R.bound("writer")
+            checker = R.bound("factcheck", exclude_from=writer)     # never the writer's model family
+            shortener = R.bound("utility")
             c, seen = pick_reel_cluster()
             if not c:
                 log({"skip": "no eligible story"})
@@ -140,10 +150,11 @@ def main():
             sid = datetime.now(timezone.utc).strftime("%Y%m%d%H%M") + "-" + c["key"]
             summary["story_titles"] = [i["title"] for i in c["items"][:4]]
             summary["outlets"] = c["sources"]
-            S, _src = write_story(llm, c["items"], c["sources"], sid, fetch_articles=not a.no_articles, log=log)
+            S, _src = write_story(writer, c["items"], c["sources"], sid, fetch_articles=not a.no_articles, log=log,
+                                  checker=checker, shortener=shortener)
             dropped = False
             for attempt in range(3):
-                bad = verify_reel(S, "B" if S.get("urgent") else "A", summary)
+                bad = verify_reel(S, "B" if S.get("urgent") else "A", summary, checker)
                 if not bad:
                     break
                 if not dropped and drop_unverifiable_captions(S, [b["claim"] for b in bad], log=log):
@@ -154,7 +165,8 @@ def main():
                 hint = ("هذه الأسطر غير مدعومة بالمصادر، احذفها أو اكتبها بما تقوله المصادر حرفياً فقط: " +
                         " | ".join(b["claim"] for b in bad[:6]))
                 log({"reel_verify_retry": bad[:6]})
-                S, _src = write_story(llm, c["items"], c["sources"], sid, fetch_articles=False, log=log, hint=hint, src=_src)
+                S, _src = write_story(writer, c["items"], c["sources"], sid, fetch_articles=False, log=log, hint=hint, src=_src,
+                                      checker=checker, shortener=shortener)
             summary["t_story_s"] = round(time.time() - t0, 1)
             style0 = "B" if S.get("urgent") else "A"
             media_root = build / "media"
@@ -200,6 +212,11 @@ def main():
             mark_reeled(seen, c)
             summary["queued_as"] = item["id"]
         summary["result"] = "ok (dry run: not queued)" if dry else "ok"
+        (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1))
+        log(summary)
+        return 0
+    except R.Hold as ex:              # quota exhausted / no independent checker: hold, nothing made, exit 0
+        summary["result"] = f"held: {str(ex)[:400]}"
         (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1))
         log(summary)
         return 0

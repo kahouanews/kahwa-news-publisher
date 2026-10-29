@@ -8,6 +8,14 @@ on:
         description: "Test run: write posts + cards as a workflow artifact only (nothing queued, state/ and media/ untouched)"
         type: boolean
         default: true
+      llm_probe:
+        description: "Also list Gemini model ids, probe the cheap models with one tiny call each, and print LLM availability"
+        type: boolean
+        default: true
+      writer_models:
+        description: "Optional writer chain override for this run (comma list provider:model, e.g. gemini:gemma-4-31b-it)"
+        type: string
+        default: ""
 permissions:
   contents: write
   issues: write
@@ -17,21 +25,43 @@ concurrency:
 jobs:
   write:
     runs-on: ubuntu-latest
-    timeout-minutes: 25   # write + fact-check + claim decomposition/verification (+1 repair round) per story
+    timeout-minutes: 45   # write + fact-check + claim verification per story; Groq free tier is paced (8K TPM, 1K output TPM)
     env:
       DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+      LLM_CHAIN_WRITER: ${{ github.event_name == 'workflow_dispatch' && inputs.writer_models || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -q feedparser "pillow>=10.1"
+      - name: LLM models, probes and availability (manual runs)
+        if: github.event_name == 'workflow_dispatch' && inputs.llm_probe
+        continue-on-error: true
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          LLM_QUOTA_FILE: out/llm_quota-probe.json
+        run: |
+          mkdir -p out
+          python -m kahwa_publisher.llm --list-models --status \
+            --probe "gemini:gemma-4-31b-it,gemini:gemma-4-26b-a4b-it,gemini:gemini-3.1-flash-lite,gemini:gemini-3.5-flash-lite,groq:qwen/qwen3.8-27b,groq:openai/gpt-oss-120b,openrouter:nvidia/nemotron-3-ultra-550b-a55b:free"
       - name: Fetch, rank (early-warning signals), verify across outlets, write original posts, verify claims, render cards
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           export PYTHONUNBUFFERED=1
+          # each workflow writes its own quota file (no git conflicts); dry runs keep theirs out of state/
+          if [ "$DRY" = "true" ]; then mkdir -p out; export LLM_QUOTA_FILE=out/llm_quota-newsroom-dry.json
+          else export LLM_QUOTA_FILE=state/llm_quota-newsroom.json; fi
           if [ "$DRY" = "true" ]; then python -m kahwa_publisher.newsroom --dry --out out 2>&1 | tee out.log
           else python -m kahwa_publisher.newsroom; fi
       - name: Dry-run summary
@@ -39,7 +69,7 @@ jobs:
         run: |
           echo '### Kahwa newsroom (dry run: nothing queued)' >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          grep -E '"signals"|"verify"|qa_reason|rejected_by_qa|written_dry|signal_error|llm_error' out.log | cut -c1-1500 >> "$GITHUB_STEP_SUMMARY" || true
+          grep -E '"signals"|"verify"|qa_reason|rejected_by_qa|written_dry|signal_error|llm_error|"llm|held|safety_' out.log | cut -c1-1500 >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always() && env.DRY == 'true'
