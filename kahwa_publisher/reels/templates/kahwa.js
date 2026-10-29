@@ -312,6 +312,7 @@
       const boxes = [], ctr = [st.lon, st.lat], fs = Math.round(Math.max(22, Math.min(34, st.scale / 60)));
       if (pt) { const p = proj([pt.lon, pt.lat]); if (p) boxes.push([p[0] - 130, p[1] - 130, p[0] + 130, p[1] + 130]); }
       (opt.avoid ? opt.avoid(proj, st) : []).forEach((b) => boxes.push(b));      // scene pills (country / city names)
+      if (opt.chrome !== false) boxes.push([60, 256, 1020, 298], [60, 286, 238, 370]);   // progress bar + logo bug
       for (const { t } of PRIO) t.setAttribute("visibility", "hidden");
       placePriority(boxes, fs);
       if (target) { const b = path.bounds(target); if (isFinite(b[0][0])) boxes.push([b[0][0], b[0][1], b[1][0], b[1][1]]); }
