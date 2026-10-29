@@ -215,6 +215,9 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 """
 
 
+# Gemini API free tier, Oct 2026 (ai.google.dev/gemini-api/docs/models + pricing): 3.8 Flash, 3.6 Flash, 3.5 Flash-Lite and
+# 3.1 Flash-Lite are free, each with its own daily quota; 2.5 models answer 404 "no longer available to new users".
+GEMINI_CHAIN = "gemini-3.8-flash,gemini-3.6-flash,gemini-flash-latest,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest"
 _DEAD_MODELS = {}   # per-run circuit breaker: model -> reason (daily quota exhausted, 4xx)
 
 
@@ -224,7 +227,7 @@ def llm(prompt, temperature=0.6):
     errs = []
     gk = os.getenv("GEMINI_API_KEY")
     if gk:
-        for model in os.getenv("GEMINI_MODELS", "gemini-flash-latest,gemini-2.5-flash,gemini-flash-lite-latest").split(","):
+        for model in os.getenv("GEMINI_MODELS", GEMINI_CHAIN).split(","):
           if model in _DEAD_MODELS:          # daily quota spent / model gone: don't burn ~50 s of back-off per call
               continue
           for attempt in range(3):

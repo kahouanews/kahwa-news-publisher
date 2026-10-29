@@ -61,9 +61,20 @@ Loki / OpenFactVerification-style, using the same free Gemini models:
 4. Card text (headline, title, subline, facts, numbers, quote) is verified separately without repair; reels verify every on-screen line plus the caption.
 Any LLM/parse error, an empty claim list, or a remaining unsupported claim = nothing is queued. The repaired text re-passes every hard gate (banned countries, sports, bait, 7-gram copy check, structure).
 
-## Fallback writer (if Gemini fails)
+## Fallback writer (if Gemini fails) — decision 2026-10-29: not wired in, skip-on-failure
 
-See "Fallback writer decision" below. Current behaviour: skip-on-failure — if every configured LLM fails, the run writes nothing and the next scheduled run tries again (the queue keeps the page supplied for a few hours).
+- Order today: Gemini `gemini-3.8-flash` → `gemini-3.6-flash` → `gemini-flash-latest` → `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite` → `gemini-flash-lite-latest` (all on the free tier, each with its own daily quota; `gemini-2.5-flash` was dropped: it now answers 404 "no longer available to new users") → Groq / OpenRouter (only if those secrets are ever added). Override with env `GEMINI_MODELS`. A per-run circuit breaker skips a model for the rest of the run after a daily-quota 429, a 4xx, or 3 transient failures in a row (each skip is logged as `llm_skip_model`), so a spent model no longer costs ~50 s of back-off per call. If every model fails, the run writes nothing and the next scheduled run tries again.
+- Benchmarked (`llm-fallback-bench.yml`, run 40802385273, llama.cpp b11972 prebuilt CPU, GitHub runner 4 vCPU, real newsroom prompt for a live two-outlet story):
+
+| Model (GGUF) | reasoning_effort | wall time / call | generation | result |
+| --- | --- | --- | --- | --- |
+| Jais-3-3.7B Q4_K_M (3.2 GB) | low | 72.6 s | 8.7 tok/s | valid JSON, but dropped the mandatory «المصادر:» line |
+| Jais-3-3.7B Q4_K_M | medium | 740.8 s | 6.0 tok/s | invalid JSON (14K chars of reasoning) |
+| Jais-3-0.9B Q8_0 (1.2 GB) | low | 38.4 s | 19.0 tok/s | invalid JSON |
+| Jais-3-0.9B Q8_0 | medium | 757.4 s (hit 6,144 tokens) | 8.1 tok/s | invalid JSON |
+| Gemini (reference, same prompt) | — | 142 s incl. quota back-off | — | valid, passes gates |
+
+- Why not: IFM's own cards say to always use `reasoning_effort=high` with ≥32K output tokens — impossible on a CPU runner (medium already takes ~12 min per call); the only feasible setting (low) failed our structural gate on its first story, and the fail-closed verifier would then have to be the same small model (a post needs ~6 LLM calls ≈ 7+ minutes plus a 3.2 GB download per run). Licence is fine (Apache-2.0 on every model card; note the repos carry no LICENSE file). Publishing nothing beats publishing an unverified post. Re-run the bench when a stronger small Arabic model ships.
 
 ## Testing without publishing
 
