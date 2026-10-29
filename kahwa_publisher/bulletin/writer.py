@@ -181,7 +181,7 @@ def seg_from(d, key, src_text):
     """Writer JSON -> rundown SEG (+ list of on-screen lines). Optional parts that break a rule are dropped; required parts raise."""
     if d.get("safe") is False:
         raise ValueError("writer marked the story unsafe")
-    for k in ("title", "headline", "strap", "brief"):
+    for k in ("title", "headline", "strap"):     # "brief" = the story's one-liner: never on screen (only used for overlap)
         if not (d.get(k) or "").strip():
             raise ValueError(f"missing {k}")
         if plen(d[k]) > LIM[k]:
@@ -217,11 +217,13 @@ def seg_from(d, key, src_text):
                                  "src": tag_src})
     if len(seg["shots"]) < 2:
         raise ValueError("fewer than 2 usable shots")
-    return seg, d["brief"].strip(), (srcs[0] if srcs else A.GENERIC)
+    return seg, (d.get("brief") or "").strip() if isinstance(d.get("brief"), str) else "", (srcs[0] if srcs else A.GENERIC)
 
 
-def seg_lines(seg, brief):
-    out = [seg["title"], seg["headline"], brief]
+def seg_lines(seg, brief=None):
+    """On-screen lines of a main segment. The segment's own one-liner (`brief`) is NOT on screen since 2026-10-29
+    («باختصار» carries other stories only), so it is neither shown nor verified."""
+    out = [seg["title"], seg["headline"]]
     for s in seg["shots"]:
         out += RD._shot_texts(s)
     if seg.get("map") and seg["map"]["point"].get("label"):
@@ -231,7 +233,7 @@ def seg_lines(seg, brief):
 
 def _owner_lines(seg, brief):
     """[(line, owner)]: owner None = required (title/headline/brief/first strap/place label), else ("shot", i) or ("row", i, j)."""
-    out = [(seg["title"], None), (seg["headline"], None), (brief, None)]
+    out = [(seg["title"], None), (seg["headline"], None)]
     for i, s in enumerate(seg["shots"]):
         if s["type"] == "next":
             out.append((s["title"], ("shot", i)))
@@ -321,12 +323,36 @@ def anchors_for(place=None, actor=None, who=None, src_text=""):
         if isinstance(a, str) and a.strip() and (not src_text or all(_core(w) in nsrc for w in a.split()
                                                                          if len(_core(w)) >= 3 and norm(w).strip() not in _GENERIC_ANCHOR)):
             names.append(a)
+    for lab in _source_countries(src_text):        # a country the sources name is a valid «where» (country-wide stories: no point)
+        names.append(lab)
     out = set()
     for n in names:
         for w in re.split(r"[\s·،,/-]+", n or ""):
             c = _core(w)
             if len(c) >= 3 and norm(w).strip() not in _GENERIC_ANCHOR and c not in _GENERIC_ANCHOR:
                 out.add(c)
+    return out
+
+
+COUNTRY_ALIASES = {"الولايات المتحدة": ("أمريكا", "الأمريكية", "الأمريكي", "واشنطن"), "المملكة المتحدة": ("بريطانيا", "البريطاني", "لندن")}
+
+
+def _source_countries(src_text):
+    """Arabic country names (map labels + a few aliases) that appear in the sources; banned / no-focus shapes excluded."""
+    from ..newsroom import norm
+    if not src_text:
+        return []
+    ns = norm(src_text)
+    out = []
+    for f in RD.geo.features():
+        lab = RD.geo.label_of(f)
+        if not lab or RD.geo.is_no_focus(f) or f["properties"].get("a") in BANNED_ISO:
+            continue
+        for name in (lab,) + COUNTRY_ALIASES.get(lab, ()):
+            if norm(name).strip() and norm(name).strip() in ns:
+                out.append(name)
+                out += [a for a in COUNTRY_ALIASES.get(lab, ())]
+                break
     return out
 
 
@@ -367,8 +393,10 @@ def self_contained_problems(lines, anchors, need_anchor=("headline", "brief")):
 
 
 STANDALONE_PROMPT = """أنت مدقق تحرير في نشرة أخبار مرئية بلا صوت. السطور التالية تظهر على الشاشة. لكل سطر احكم: هل يفهمه مشاهد يراه وحده
-(أو داخل فقرته إن ذُكرت الفقرة) فيعرف مَن الفاعل وما الحدث وأين، دون أن يحتاج إلى سطر آخر؟ سطر يبدأ بـ«المشتبه به» أو «الهجوم» أو
-«الحادث» دون تحديد أي هجوم وأين = غير مفهوم. عنوان الفقرة القصير (2-3 كلمات) مقبول إن حدّد الخبر. لا تحكم على الصحة، فقط على الوضوح.
+(أو داخل فقرته إن ذُكرت الفقرة) فيعرف عن أي خبر يتحدث، دون أن يحتاج إلى سطر آخر؟
+يكفي أن يحدد السطر الحدث مع فاعل مسمّى (شخص أو جهة أو بلد) أو مع المكان؛ لا يُشترط ذكر الاثنين ولا ذكر مكان وفاة أو تاريخ.
+ارفض فقط السطر الذي يترك المشاهد يسأل «مَن؟» أو «أي حدث؟»، مثل سطر يبدأ بـ«المشتبه به» أو «الهجوم» أو «الحادث» دون تحديد أي هجوم وأين.
+عنوان الفقرة القصير (2-3 كلمات) مقبول إن حدّد الخبر. سطر داخل فقرة مقبول إن فُهم مع عنوان فقرته. لا تحكم على الصحة، فقط على الوضوح.
 أعد JSON فقط: {"results": [{"i": 1, "ok": true, "why": "سبب قصير إن كان غير مفهوم"}]}
 
 السطور:
@@ -409,8 +437,11 @@ def write_segment(writer, checker, c, key, fetch_articles=True, brief_only=False
         try:
             d = _json(writer(prompt + hint, temperature=0.4))
             if brief_only:
-                if d.get("safe") is False or not (d.get("brief") or "").strip() or plen(d["brief"]) > LIM["brief"]:
-                    raise ValueError("brief missing/too long/unsafe")
+                if d.get("safe") is False:
+                    raise ValueError("writer marked the story unsafe")
+                if not (d.get("brief") or "").strip() or plen(d["brief"]) > LIM["brief"]:
+                    raise ValueError(f"brief missing or too long ({plen(d.get('brief'))} > {LIM['brief']} حرفاً): اكتب جملة أقصر "
+                                     "تذكر الفاعل أو المكان")
                 if plen(d.get("headline")) > LIM["headline"] or not (d.get("headline") or "").strip():
                     raise ValueError("headline missing/too long")
                 srcs = A.rank([d.get("source") or ""], src, limit=1)
@@ -431,8 +462,8 @@ def write_segment(writer, checker, c, key, fetch_articles=True, brief_only=False
                 q = d.get("quote") if isinstance(d.get("quote"), dict) else {}
                 anchors = anchors_for(extra["place"] or (valid_place(d["place"]) if isinstance(d.get("place"), dict) else None),
                                       d.get("actor"), q.get("who"), src_text=src)
-                sc_lines = [("title", seg["title"]), ("headline", seg["headline"]), ("brief", b)]
-                sa_items = [("title", seg["title"], ""), ("headline", seg["headline"], ""), ("brief", b, "")] + \
+                sc_lines = [("title", seg["title"]), ("headline", seg["headline"])]
+                sa_items = [("title", seg["title"], ""), ("headline", seg["headline"], "")] + \
                            [(sh["type"], sh["text"], seg["title"]) for sh in seg["shots"] if sh["type"] in ("strap", "map")]
             probs = screen_problems(lines, src) + self_contained_problems(sc_lines, anchors)
             if probs:

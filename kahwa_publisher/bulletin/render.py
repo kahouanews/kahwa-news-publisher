@@ -189,12 +189,13 @@ def mix_body(B, out_wav):
         inputs.append(SFX / "lloydevans09-whoosh-332003.mp3"); chains.append(f"volume=-12dB,adelay={int(max(0, T['end'] - 0.25) * 1000)}|{int(max(0, T['end'] - 0.25) * 1000)}")
     else:
         nseg = len([g for g in B["segs"] if g["k"] != "brief"])
-        bumpers = [f"b{i}" for i in range(1, nseg + 2)]
+        bumpers = [f"b{i}" for i in range(1, nseg + 2) if f"b{i}" in T]   # b{nseg+1} = «باختصار», absent when dropped
         beds = ["bed-calm", "bed-explainer"]
         cues = [("bed-breaking", 0.0, T["b1"])]
         for i in range(nseg):
-            cues.append((beds[i % 2], T[bumpers[i]], T[bumpers[i + 1]]))
-        cues.append(("bed-light", T[bumpers[-1]], T["end"] + 1.0))
+            cues.append((beds[i % 2], T[bumpers[i]], T[bumpers[i + 1]] if i + 1 < len(bumpers) else T["end"] + 1.0))
+        if len(bumpers) > nseg:
+            cues.append(("bed-light", T[bumpers[-1]], T["end"] + 1.0))
         for name, a, b in cues:
             a0 = max(0.0, a - 0.3)
             dur = b - a0 + 0.4

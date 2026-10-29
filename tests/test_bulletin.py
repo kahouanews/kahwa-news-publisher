@@ -459,7 +459,7 @@ def test_writer_rejects_vague_brief_and_rewrites_once(monkeypatch):
         calls.append(p)
         d = good()
         if len(calls) == 1:
-            d["brief"] = "الحادث أوقع [[69 قتيلًا]]"                  # vague -> rejected, rewrite requested with the reason
+            d["headline"] = "الحادث أوقع [[69 قتيلًا]]"               # vague -> rejected, rewrite requested with the reason
         return json.dumps(d, ensure_ascii=False)
     monkeypatch.setattr(W, "verify_lines", lambda ch, lines, src: ([{"claim": "x"}], []))
     monkeypatch.setattr(W, "standalone_check", lambda ch, items: [])
@@ -467,7 +467,40 @@ def test_writer_rejects_vague_brief_and_rewrites_once(monkeypatch):
     c = _cl("k", "اصطدام قطارين", [])
     seg, br, meta = W.write_segment(_Fake(writer), _Fake(lambda p: ""), c, "s1", fetch_articles=False)
     assert seg and len(calls) == 2 and "الحادث" in calls[1].split("ملاحظة من المدقق")[-1]
-    assert br["t"] == good()["brief"]
+    assert seg["headline"] == good()["headline"]
+
+
+def test_brief_only_vague_line_rewritten_once_then_dropped(monkeypatch):
+    monkeypatch.setattr(W, "verify_lines", lambda ch, lines, src: ([{"claim": "x"}], []))
+    monkeypatch.setattr(W, "standalone_check", lambda ch, items: [])
+    monkeypatch.setattr(W, "source_block", lambda items, fetch_articles=True: SRC)
+    vague = {"brief": "المشتبه به أقر بالتخطيط المسبق للهجوم", "headline": "اعترافات المشتبه به", "source": "", "place": None}
+    _, br, meta = W.write_segment(_Fake(lambda p: json.dumps(vague, ensure_ascii=False)), _Fake(lambda p: ""), _cl("k", "x", []), "b",
+                                  fetch_articles=False, brief_only=True)
+    assert br is None and ("self-contained" in meta["error"] or "opens with" in meta["error"])
+    long_ = dict(vague, brief="إسبانيا " + "ب" * 70)
+    _, br, meta = W.write_segment(_Fake(lambda p: json.dumps(long_, ensure_ascii=False)), _Fake(lambda p: ""), _cl("k", "x", []), "b",
+                                  fetch_articles=False, brief_only=True)
+    assert br is None and "too long" in meta["error"]
+
+
+def test_segment_one_liner_is_off_screen_and_never_drops_a_segment():
+    d = dict(good(), brief="ب" * 95)                              # run 40969233856: Trappes dropped for «brief too long (77 > 64)»
+    seg, b, _ = W.seg_from(d, "s1", SRC)
+    assert seg and b not in W.seg_lines(seg, b)
+
+
+def test_body_audio_mix_without_brief_section(monkeypatch, tmp_path):
+    """run 40969233856 crashed with KeyError 'b4' when «باختصار» was dropped (no bumper after the last segment)."""
+    from kahwa_publisher.bulletin import render as RN
+    s = spec()
+    s["brief"] = []
+    B = RD.build(s)
+    got = {}
+    monkeypatch.setattr(RN, "_run_mix", lambda inputs, chains, out, dur: got.update(n=len(inputs)))
+    monkeypatch.setattr(RN, "sh", lambda *a, **k: None)
+    RN.mix_body(B, tmp_path / "body.wav")
+    assert got["n"] > 5
 
 
 def test_writer_drops_story_when_checker_says_unclear_twice(monkeypatch):
