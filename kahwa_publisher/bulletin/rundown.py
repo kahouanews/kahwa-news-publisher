@@ -101,7 +101,12 @@ def visible_no_focus(st, w=1080, h=1920, margin=40, isos=_LABELLED_NO_FOCUS):
     return out
 
 
-def point_on_screen(st, lon, lat, box=(90, 300, 990, 1200)):
+# top 380: the place-label pill is drawn 96 px above the point (body.tpl.js mapVis) and must stay below the safe-zone top (269);
+# a point at y=332 put «مصر» above the safe zone in run 40957631882.
+POINT_BOX = (90, 380, 990, 1200)
+
+
+def point_on_screen(st, lon, lat, box=POINT_BOX):
     p = geo._ortho_forward(lon, lat, st["lon"], st["lat"], st["scale"], 540, st.get("cy", 560))
     return bool(p) and box[0] <= p[0] <= box[2] and box[1] <= p[1] <= box[3]
 
@@ -176,13 +181,11 @@ def map_from_place(place):
     ext = max((max(xs) - min(xs)) * math.cos(math.radians(cy_)), max(ys) - min(ys), 2.0)
     s1 = max(1500, min(8000, 1.6 * 560 / math.radians(ext)))
     st1 = {"lon": round((cx + lon) / 2, 3), "lat": round((cy_ + lat) / 2, 3), "scale": round(s1), "cy": 560, "tfo": 0.08}
-    for _ in range(8):                                   # keep the story point framed
-        if point_on_screen(st1, lon, lat):
-            break
-        st1["scale"] = round(st1["scale"] * 0.85)
+    if not point_on_screen(st1, lon, lat):                # keep the story point (and its label pill) framed: pan, keep the zoom
+        st1.update(lon=round(lon, 3), lat=round(lat, 3))
     st0 = dict(st1, lon=round(cx, 3), lat=round(cy_, 3), scale=round(st1["scale"] * 0.85))
-    if in_no_focus(st0["lon"], st0["lat"]):
-        st0.update(lon=st1["lon"], lat=st1["lat"])
+    if in_no_focus(st0["lon"], st0["lat"]) or not point_on_screen(st0, lon, lat):
+        st0.update(lon=st1["lon"], lat=st1["lat"])          # zooming out about s1's centre keeps the point (and its label) framed
     pt = {"lon": lon, "lat": lat, "label": place.get("label") or ""}
     return safe_map({"iso3": place["iso3"], "point": pt, "s0": st0, "s1": st1})
 

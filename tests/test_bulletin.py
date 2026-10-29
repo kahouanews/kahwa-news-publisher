@@ -247,3 +247,11 @@ def test_seg_from_accepts_slightly_long_title_after_fitting():
          "number": {"num": "2.5%", "label": "سعر الفائدة", "deck": "دون تغيير"}, "sources": []}
     seg, _, _ = W.seg_from(d, "s1", "سعر الفائدة 2.5%")
     assert W.plen(seg["title"]) <= W.LIM["title"]
+
+
+def test_map_label_pill_stays_inside_safe_zone_cairo():
+    """Run 40957631882: Egypt story placed at Cairo, label «مصر» drawn 96 px above a point at y=332 -> above the safe zone (269)."""
+    m = RD.map_from_place({"iso3": "EGY", "lon": 31.236, "lat": 30.044, "label": "مصر"})
+    for k in ("s0", "s1"):
+        p = RD.geo._ortho_forward(31.236, 30.044, m[k]["lon"], m[k]["lat"], m[k]["scale"], 540, m[k].get("cy", 560))
+        assert p and p[1] - 96 >= 269 + 10, (k, p)
