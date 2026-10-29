@@ -7,6 +7,8 @@ outlets (newsroom.FEEDS) carry it, and the banned-country / sports / restricted 
    every 5 s): Arabic-language coverage of the last 3 hours. For every cluster we count how many distinct OTHER
    news domains already run the same story ("breadth"). Stories that GDELT sees on >=4 domains but none of our feeds
    carry are logged as a watch list (never written: they lack our two-outlet confirmation).
+   When the DOC API rate-limits (HTTP 429 is common from shared cloud runners) the same breadth is computed from
+   GDELT's translingual GKG 15-minute files (data.gdeltproject.org, static): Arabic-source rows, original page titles.
 2. Wikipedia pageviews (ar.wikipedia action=query&prop=pageviews, 30 daily values for up to 50 titles per request,
    no key): the cluster's names that are real Arabic Wikipedia articles; a spike = latest complete day vs the median of
    the previous 21 days. Data lags 1-2 days, so it mostly lifts developing stories the public is actively reading up on.
@@ -51,6 +53,37 @@ def gdelt_articles(timespan="3h", tries=3):
         time.sleep(6 + 4 * i)        # GDELT: one request every 5 seconds
     print(json.dumps({"signal_error": "gdelt", "err": last}, ensure_ascii=False))
     return []
+
+
+def gdelt_gkg_articles(files=4):
+    """Fallback when the DOC API rate-limits (common from shared cloud IPs): GDELT 2.1 translingual GKG files
+    (data.gdeltproject.org, static, 15-minute batches). Keeps Arabic-source rows (TranslationInfo srclc:ara) and
+    reads the original page title from Extras <PAGE_TITLE>. Last `files` batches = last hour."""
+    import io
+    import zipfile
+    from datetime import datetime, timedelta
+    last = _get("http://data.gdeltproject.org/gdeltv2/lastupdate-translation.txt", timeout=20)
+    url = next((ln.split()[-1] for ln in last.splitlines() if ln.strip().endswith(".gkg.csv.zip")), None)
+    if not url:
+        return []
+    stamp = re.search(r"/(\d{14})\.translation", url).group(1)
+    t = datetime.strptime(stamp, "%Y%m%d%H%M%S")
+    arts = []
+    for k in range(files):
+        u = f"http://data.gdeltproject.org/gdeltv2/{(t - timedelta(minutes=15 * k)).strftime('%Y%m%d%H%M%S')}.translation.gkg.csv.zip"
+        try:
+            req = urllib.request.Request(u, headers={"User-Agent": UA})
+            zb = urllib.request.urlopen(req, timeout=60).read()
+            z = zipfile.ZipFile(io.BytesIO(zb))
+            for line in z.read(z.namelist()[0]).decode("utf-8", "replace").splitlines():
+                f = line.split("\t")
+                if len(f) > 26 and "srclc:ara" in f[25].lower():
+                    m = re.search(r"<PAGE_TITLE>(.*?)</PAGE_TITLE>", f[26])
+                    if m:
+                        arts.append({"domain": f[3], "title": m.group(1)})
+        except Exception as ex:
+            print(json.dumps({"signal_error": "gdelt_gkg", "file": u[-40:], "err": str(ex)[:100]}))
+    return arts
 
 
 def gdelt_breadth(clusters, arts, tokens, blocked_text):
@@ -161,7 +194,13 @@ def apply(clusters, tokens, blocked, blocked_text, top_n=12, log=print):
         c["signals"] = {}
     cand = [c for c in clusters if not blocked(c)][:top_n]
     watch = []
-    arts = gdelt_articles()
+    arts, gsrc = gdelt_articles(tries=2), "doc_api"
+    if not arts:
+        try:
+            arts, gsrc = gdelt_gkg_articles(), "gkg_translingual"
+        except Exception as ex:
+            arts, gsrc = [], "none"
+            print(json.dumps({"signal_error": "gdelt_gkg", "err": str(ex)[:120]}))
     if arts:
         watch = gdelt_breadth(cand, arts, tokens, blocked_text)
     for c in cand:
@@ -171,7 +210,7 @@ def apply(clusters, tokens, blocked, blocked_text, top_n=12, log=print):
         c["signals"] = {"gdelt_domains": g, "gdelt_boost": round(gb, 2), "wiki": wtop, "wiki_boost": round(wb, 2)}
         c["score"] = c["base_score"] + gb + wb
     clusters.sort(key=lambda c: -c["score"])
-    log(json.dumps({"signals": {"gdelt_articles": len(arts), "seconds": round(time.time() - t0, 1),
+    log(json.dumps({"signals": {"gdelt_source": gsrc, "gdelt_articles": len(arts), "seconds": round(time.time() - t0, 1),
                                 "ranked": [{"title": c["items"][0]["title"][:70], "outlets": len(c["sources"]),
                                             "base": round(c["base_score"], 1), "score": round(c["score"], 1),
                                             **c["signals"]} for c in cand[:8]],

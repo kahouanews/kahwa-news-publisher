@@ -133,7 +133,8 @@ jobs:
           git diff --cached --quiet || git commit -m "reel queued ${ID}"
           for i in 1 2 3 4; do git pull --rebase -q && git push -q && break; sleep 7; done
       - name: Alert (GitHub issue = email) and skip
-        if: failure()
+        # manual dry-run tests fail loudly in the run itself but do not open an issue/email
+        if: failure() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           { echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"; echo;

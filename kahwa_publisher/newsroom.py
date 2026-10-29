@@ -64,6 +64,11 @@ SPORTS = ["كرة القدم", "كرة قدم", "مباراة", "مباريات"
           "كاف", "الأولمبية", "أولمبي", "تنس", "فورمولا", "رالي", "ملاكمة", "سباق", "بطولة", "انتقالات", "ميركاتو",
           "ريال مدريد", "برشلونة", "ليفربول", "مانشستر", "بايرن", "يوفنتوس", "ميسي", "رونالدو", "صلاح", "مبابي",
           "الأهلي", "الزمالك", "الرجاء", "الوداد", "الترجي", "الهلال", "النصر", "الاتحاد السعودي لكرة"]
+# unambiguous sports words: ONE hit is enough (weak words like هدف/لاعب/سباق/بطولة also appear in politics)
+SPORTS_STRONG = ["كرة القدم", "كرة قدم", "كرة السلة", "كرة اليد", "دوري أبطال", "الدوري الإنجليزي", "الدوري الإسباني", "الفيفا", "فيفا", "يويفا", "ميركاتو",
+                 "ريال مدريد", "برشلونة", "ليفربول", "مانشستر", "بايرن", "يوفنتوس", "باريس سان جيرمان", "ميسي", "رونالدو",
+                 "مبابي", "الزمالك", "الوداد", "الرجاء", "الترجي", "فورمولا 1", "الفورمولا", "تنس", "ويمبلدون", "الأولمبية",
+                 "ركلة جزاء", "مباراة", "مباريات"]
 STOP = set("في من على إلى عن مع بعد قبل أن إن كان قد التي الذي هذه هذا و أو ثم لا ما بين خلال حول ضد عند".split())
 SEEN = ROOT / "state" / "seen.json"
 MEDIA = ROOT / "media"
@@ -152,7 +157,8 @@ def blocked(c):
     text = " ".join(i["title"] + " " + i["summary"] for i in c["items"])
     words = set(norm(text).split())
     sport_hits = sum((k in text) if " " in k else (norm(k) in words) for k in SPORTS)
-    return any(b in text for b in BLOCK) or banned_country(text) or sport_hits >= 2
+    strong = any((k in text) if " " in k else (norm(k) in words or norm("ال" + k) in words) for k in SPORTS_STRONG)
+    return any(b in text for b in BLOCK) or banned_country(text) or sport_hits >= 2 or strong
 
 
 def load_seen():

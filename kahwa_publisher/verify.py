@@ -79,11 +79,17 @@ def numbers(t):
     return {n.replace(",", "").rstrip(".") for n in re.findall(r"\d[\d.,]*", t)}
 
 
+SERIES_PREFIXES = ("فهم الخبر", "العالم في 30 ثانية", "بالأرقام", "#عاجل", "عاجل")
+
+
 def _strip_for_claims(text):
-    """Lines that are not claims: sources line, archive-photo credit lines, hashtags-only lines."""
+    """Lines that are not claims: sources line, archive-photo credit lines, hashtags-only lines. A series label
+    ("فهم الخبر | ...") is a programme name, not a claim: only the subject after "|" is checked."""
     keep = []
     for ln in (text or "").splitlines():
         s = ln.strip()
+        if "|" in s and s.split("|", 1)[0].strip() in SERIES_PREFIXES:
+            s = ln = s.split("|", 1)[1].strip()
         if not s or s.startswith(("المصادر", "صورة أرشيفية", "صور ولقطات أرشيفية", "صورة:")) or re.fullmatch(r"(#\S+\s*)+", s):
             continue
         keep.append(ln)

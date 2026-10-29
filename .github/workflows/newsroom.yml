@@ -17,7 +17,7 @@ concurrency:
 jobs:
   write:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25   # write + fact-check + claim decomposition/verification (+1 repair round) per story
     env:
       DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
     steps:

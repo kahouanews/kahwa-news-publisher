@@ -254,10 +254,11 @@ def fact_check(llm, S, src):
     return bool(d.get("ok")), [str(p)[:160] for p in (d.get("problems") or [])][:6]
 
 
-def write_story(llm, items, outlets, sid, fetch_articles=True, log=print):
-    """Run the LLM (one retry with the validator's complaint) and return (story, source_text)."""
-    src = source_block(items, fetch_articles)
-    err = None
+def write_story(llm, items, outlets, sid, fetch_articles=True, log=print, hint=None, src=None):
+    """Run the LLM (one retry with the validator's complaint) and return (story, source_text).
+    hint: complaint from a previous rejected story (e.g. unsupported claims) to correct on the first attempt."""
+    src = src or source_block(items, fetch_articles)
+    err = hint
     for attempt in range(2):
         prompt = PROMPT + src + (f"\n\nملاحظة: المحاولة السابقة رُفضت لهذا السبب: {err}. صحّح ذلك." if err else "")
         raw = llm(prompt)
