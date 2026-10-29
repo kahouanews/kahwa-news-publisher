@@ -1,0 +1,101 @@
+{
+ "id": "maptest-lbn",
+ "date_ar": "الخميس 29 أكتوبر 2026",
+ "topic_ar": "اختبار",
+ "headline": "اختبار [[الخريطة]]: لبنان",
+ "headline_breaking": "اختبار [[الخريطة]]: لبنان",
+ "deck": "عرض تجريبي للخريطة فقط، لا يُنشر",
+ "visual_caption": "",
+ "visual_tab": "اختبار",
+ "location": {
+  "country_iso3": "LBN",
+  "label_ar": "لبنان",
+  "region_ar": "",
+  "point": {
+   "lon": 35.5,
+   "lat": 33.89,
+   "label_ar": "بيروت"
+  },
+  "map": {
+   "ok": true,
+   "lon": 35.852,
+   "lat": 33.798,
+   "s0": 3570,
+   "s1": 4200,
+   "cy": 600
+  }
+ },
+ "where_line": "[[لبنان]] على الخريطة",
+ "lower_third": {
+  "name_ar": "بيروت",
+  "role_ar": "نقطة اختبار",
+  "source": "وكالات"
+ },
+ "facts": [
+  {
+   "text": "سطر اختبار 1",
+   "source": "وكالات"
+  },
+  {
+   "text": "سطر اختبار 2",
+   "source": "وكالات"
+  },
+  {
+   "text": "سطر اختبار 3",
+   "source": "وكالات"
+  }
+ ],
+ "next": {
+  "title_ar": "ماذا بعد؟",
+  "lines": [
+   "سطر أ",
+   "سطر ب"
+  ],
+  "sources": [
+   "وكالات",
+   "وكالات"
+  ]
+ },
+ "breaking_lines": [
+  {
+   "text": "سطر عاجل 1",
+   "source": "وكالات"
+  },
+  {
+   "text": "سطر عاجل 2",
+   "source": "وكالات"
+  },
+  {
+   "text": "سطر عاجل 3",
+   "source": "وكالات"
+  },
+  {
+   "text": "سطر عاجل 4",
+   "source": "وكالات"
+  }
+ ],
+ "ticker": [
+  "سطر 1",
+  "سطر 2"
+ ],
+ "sources": [
+  "وكالات"
+ ],
+ "tagline": "أخبار العالم… باختصار",
+ "mood": "serious",
+ "tragic": false,
+ "urgent": false,
+ "footage_queries": [],
+ "media": {},
+ "big_number": {
+  "value": 0,
+  "display": "",
+  "prefix_ar": "",
+  "label_ar": "سطر اختبار",
+  "sub_ar": "اختبار",
+  "source": "وكالات"
+ },
+ "place_terms_en": [
+  "لبنان"
+ ]
+}

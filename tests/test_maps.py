@@ -1,5 +1,6 @@
-"""Map safety (user hard rule): Morocco (+ Western Sahara), UAE, Algeria, Israel are never drawn, outlined, shaded or
-labelled on any map - card map/numbers/facts frames and reel map/globe scenes."""
+"""Map rules (owner 2026-10-29): normal world map with every border and every Arabic country name, including Morocco /
+Algeria / UAE (map label layer only); Western Sahara a separate labelled shape; Israel + Palestine ONE undivided shape with
+no label; no map focused on MAR / DZA / ARE / ISR / the Palestine-Israel shape; MENA countries get maps again."""
 import json
 import re
 import sys
@@ -13,8 +14,7 @@ from kahwa_publisher import card, cards, geo  # noqa: E402
 from kahwa_publisher.reels import story  # noqa: E402
 from kahwa_publisher.reels.render import gate  # noqa: E402
 
-BANNED = {"MAR", "ARE", "DZA", "ISR", "ESH", "SAH"}
-NAMES = re.compile(r"morocc|western sahara|algeri|emirates|israel|المغرب|الصحراء الغربية|الجزائر|الإمارات|إسرائيل", re.I)
+ISRAEL = re.compile(r"israel|إسرائيل|اسرائيل|palestin|فلسطين", re.I)
 
 
 def _world_js():
@@ -22,88 +22,130 @@ def _world_js():
     return json.loads(s[s.index("{"): s.rindex("}") + 1])
 
 
-@pytest.mark.parametrize("data", ["geojson", "world.js"])
-def test_banned_geometries_absent_from_map_data(data):
-    feats = json.loads((ROOT / "assets/countries.geojson").read_text())["features"] if data == "geojson" else _world_js()["features"]
-    assert len(feats) > 150
-    isos = {str(f["properties"].get("a", "")).upper() for f in feats}
-    assert not isos & BANNED
-    assert not any(NAMES.search(json.dumps(f["properties"], ensure_ascii=False)) for f in feats)
+def _both():
+    return [("geojson", json.loads((ROOT / "assets/countries.geojson").read_text())["features"]),
+            ("world.js", _world_js()["features"])]
 
 
-def test_geo_features_filtered():
-    assert not {f["properties"]["a"] for f in geo.features()} & BANNED
-    for f in ({"properties": {"a": "MAR"}}, {"properties": {"a": "x", "n": "Western Sahara"}}, {"properties": {"ar": "الإمارات"}}):
-        assert geo.is_banned_feature(f)
+@pytest.mark.parametrize("name,feats", _both())
+def test_full_world_with_labels(name, feats):
+    assert len(feats) > 170
+    by = {f["properties"]["a"]: f for f in feats}
+    for iso in ("TUN", "EGY", "ESP", "ITA", "TUR", "SAU", "LBY", "JOR", "LBN", "SYR", "MRT", "FRA"):
+        assert geo.label_of(by[iso]), iso
+    # Morocco / Algeria / UAE drawn AND labelled with their Arabic names (map label layer only)
+    assert geo.label_of(by["MAR"]) == "المغرب"
+    assert geo.label_of(by["DZA"]) == "الجزائر"
+    assert geo.label_of(by["ARE"]) == "الإمارات"
 
 
-def _no_banned_vertex(view):
-    """No KEEP_OUT cell inside a lon/lat view."""
-    x0, y0, x1, y1 = view
-    return geo.view_clear(x0, y0, x1, y1)
+@pytest.mark.parametrize("name,feats", _both())
+def test_palestine_israel_one_unlabelled_shape(name, feats):
+    pi = [f for f in feats if f["properties"]["a"] in ("ISR", "PSE", "PSX")]
+    assert len(pi) == 1                                          # one feature, no Israel feature, no separate Palestine
+    f = pi[0]
+    assert f["properties"] == {"a": "PSE", "nl": 1}              # no name, no Arabic label, no label point
+    assert geo.label_of(f) is None
+    assert f["geometry"]["type"] == "Polygon" and len(f["geometry"]["coordinates"]) == 1   # outer ring only, no inner line
+    lons = [x for x, _ in f["geometry"]["coordinates"][0]]
+    lats = [y for _, y in f["geometry"]["coordinates"][0]]
+    assert min(lons) < 34.6 and max(lons) > 35.4 and min(lats) < 30 and max(lats) > 32.9   # covers both areas
+    # no label anywhere says Israel / Palestine
+    assert not any(ISRAEL.search(str(geo.label_of(x) or "")) for x in feats)
+    assert not any(ISRAEL.search(json.dumps(x["properties"], ensure_ascii=False)) for x in feats)
 
 
-@pytest.mark.parametrize("country", ["France", "Brazil", "Japan", "India", "Greece", "Germany", "Sudan", "Yemen", "Iraq",
-                                     "Tunisia", "Egypt", "Spain", "Saudi Arabia", "Libya", "Jordan", "Oman", "Italy", "Mali"])
-def test_rendered_card_maps_never_contain_banned(country):
+@pytest.mark.parametrize("name,feats", _both())
+def test_western_sahara_separate_from_morocco(name, feats):
+    by = {f["properties"]["a"]: f for f in feats}
+    assert "ESH" in by and "MAR" in by and by["ESH"] is not by["MAR"]
+    assert geo.label_of(by["ESH"]) == "الصحراء الغربية"
+    mar = [(round(x, 1), round(y, 1)) for x, y in by["MAR"]["geometry"]["coordinates"][0]]
+    esh = [(round(x, 1), round(y, 1)) for x, y in by["ESH"]["geometry"]["coordinates"][0]]
+    assert max(y for _, y in mar) > 35 and min(y for _, y in esh) < 22        # Morocco north, Western Sahara south
+    assert set(mar) & set(esh)                                                # shared border edge (drawn)
+
+
+@pytest.mark.parametrize("country", ["Tunisia", "Egypt", "Spain", "Italy", "Turkey", "Saudi Arabia", "Libya", "Jordan",
+                                     "Lebanon", "Mauritania", "Oman", "Qatar", "Syria", "France", "Brazil", "Japan"])
+def test_card_maps_render_for_mena_and_world(country):
     res = card.map_image(country)
-    assert not set(card.LAST_DRAWN) & BANNED                 # nothing banned was drawn
-    if res is not None:
-        assert res[0].size == (card.W, card.PH)
+    assert res is not None and res[0].size == (card.W, card.PH)
+    labels = dict(card.LAST_LABELS)
+    assert labels and all(geo.label_of({"properties": {"a": iso, "ar": lab}}) for iso, lab in card.LAST_LABELS)
+    assert "PSE" not in labels                                   # the Palestine/Israel shape never carries text
+    assert not any(ISRAEL.search(lab) for lab in labels.values())
 
 
-@pytest.mark.parametrize("country", ["Tunisia", "Libya", "Mauritania", "Mali", "Niger", "Spain", "Saudi Arabia", "Oman",
-                                     "Qatar", "Egypt", "Jordan", "Lebanon", "Palestine", "Syria"])
-def test_conspicuous_gap_falls_back_to_no_map(country):
-    assert card.map_image(country) is None                  # the banned neighbour's gap would show -> non-map card
+def test_card_maps_label_morocco_and_algeria_and_draw_western_sahara():
+    card.map_image("Mauritania")
+    drawn = set(card.LAST_DRAWN)
+    assert {"MAR", "DZA", "ESH"} <= drawn
+    labs = dict(card.LAST_LABELS)
+    assert labs.get("DZA") == "الجزائر" or labs.get("MAR") == "المغرب"
+    card.map_image("Lebanon")
+    assert "PSE" in card.LAST_DRAWN and "PSE" not in dict(card.LAST_LABELS)
 
 
-@pytest.mark.parametrize("country", ["Morocco", "Algeria", "United Arab Emirates", "Israel", "Western Sahara", "UAE"])
-def test_banned_country_has_no_map(country):
+@pytest.mark.parametrize("country", ["Morocco", "Algeria", "United Arab Emirates", "UAE", "Israel", "Palestine"])
+def test_no_map_focused_on_no_focus_territory(country):
     assert card.map_image(country) is None
 
 
-def test_map_card_without_safe_map_renders_text_only(tmp_path):
+def test_map_card_for_tunisia_uses_the_map(tmp_path):
     out = tmp_path / "c.jpg"
     r = cards.render_card({"card_type": "map", "headline": "عنوان تجريبي عن تونس", "title": "تونس", "kicker": "تونس",
                            "country_en": "Tunisia", "source": "وكالات"}, out)
-    assert out.exists() and not r["credit"].startswith("خريطة")
+    assert out.exists() and r["credit"].startswith("خريطة")
 
 
-@pytest.mark.parametrize("iso", ["TUN", "EGY", "ESP", "SAU", "LBY", "JOR", "LBN", "PSE", "PSX", "MRT", "NER", "OMN"])
-def test_reel_map_view_rejects_conspicuous(iso):
-    if iso not in story.countries():
-        pytest.skip("not in data")
+@pytest.mark.parametrize("iso", ["TUN", "EGY", "ESP", "ITA", "TUR", "SAU", "LBY", "JOR", "LBN", "MRT", "OMN",
+                                 "BRA", "JPN", "IND", "USA", "CHN", "GBR", "DEU"])
+def test_reel_map_view_ok(iso):
+    lon, lat = story.centroid(iso)
+    mv = story.map_view(iso, lon, lat)
+    assert mv["ok"] and mv["s1"] > mv["s0"] > 0
+
+
+@pytest.mark.parametrize("iso", ["MAR", "DZA", "ARE", "PSE"])
+def test_reel_map_view_never_focuses_no_focus(iso):
     lon, lat = story.centroid(iso)
     assert story.map_view(iso, lon, lat) == {"ok": False}
 
 
-@pytest.mark.parametrize("iso", ["BRA", "JPN", "IND", "USA", "CHN", "GBR", "DEU", "PAK", "NGA", "IDN"])
-def test_reel_map_view_safe(iso):
-    lon, lat = story.centroid(iso)
-    mv = story.map_view(iso, lon, lat)
-    assert mv["ok"]
-    for sc in (mv["s0"], mv["s1"]):                          # no visible pixel of the camera falls on a banned cell
-        assert geo.ortho_view_clear(mv["lon"], mv["lat"], sc, 540, mv["cy"], step=6)
-
-
-def test_banned_iso_not_in_reel_countries():
-    assert not set(story.countries()) & BANNED
-
-
-def test_keep_out_covers_banned_capitals():
-    for lon, lat in ((-6.84, 34.02), (3.06, 36.75), (54.37, 24.45), (34.78, 32.08), (-13.2, 27.15)):   # Rabat, Algiers, Abu Dhabi, Tel Aviv, Laayoune
-        assert (int(lon // 1), int(lat // 1)) in geo.KEEP_OUT
-
-
-def test_gate_rejects_unsafe_reel_camera():
-    s = {"id": "x", "headline": "عنوان", "location": {"country_iso3": "TUN", "map": {"ok": True, "lon": 9.5, "lat": 34, "s0": 1500, "s1": 1800, "cy": 600}},
-         "media": {}}
+def test_gate_rejects_map_focused_on_no_focus():
+    s = {"id": "x", "headline": "عنوان", "location": {"country_iso3": "PSE", "map": {"ok": True, "lon": 35, "lat": 31.5, "s0": 1500,
+                                                                                    "s1": 1800, "cy": 600}}, "media": {}}
     with pytest.raises(ValueError):
         gate(s)
 
 
-def test_kahwa_js_filters_banned():
+def test_gate_accepts_tunisia_map():
+    lon, lat = story.centroid("TUN")
+    s = {"id": "x", "headline": "عنوان", "location": {"country_iso3": "TUN", "map": story.map_view("TUN", lon, lat)}, "media": {}}
+    assert gate(s)
+
+
+def test_kahwa_js_map_rules():
     js = (ROOT / "kahwa_publisher/reels/templates/kahwa.js").read_text()
-    assert 'BANNED_MAP = ["MAR", "ARE", "DZA", "ISR", "ESH", "SAH"]' in js
-    assert "MAPOK" in js and "lon: 30, lat: 18, scale: 430" not in js     # no wide fly-in globe any more
+    assert 'NO_FOCUS = ["MAR", "DZA", "ARE", "ISR", "PSE", "PSX"]' in js
+    assert "!f.properties.nl" in js and "f.properties.ar" in js           # labels drawn, never on the nl shape
+    assert "BANNED_MAP" not in js and ".filter((f) => !BANNED" not in js   # nothing removed from the map any more
+    assert '"stroke": "#1C2232"' not in js and 'stroke: "#3B4762"' in js    # borders visible
+
+
+@pytest.mark.parametrize("name,feats", _both())
+def test_exterior_rings_clockwise_for_d3(name, feats):
+    """d3-geo fills the complement of a counter-clockwise ring (the whole globe): every exterior ring must be clockwise."""
+    def area2(r):
+        return sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(r, r[1:] + r[:1]))
+    for f in feats:
+        g = f["geometry"]
+        for r in ([g["coordinates"][0]] if g["type"] == "Polygon" else [p[0] for p in g["coordinates"]]):
+            assert area2(r) < 0, f["properties"].get("a")
+
+
+@pytest.mark.parametrize("fx", ["reel-map-tunisia", "reel-map-lebanon"])
+def test_map_fixtures_pass_gate(fx):
+    s = json.loads((ROOT / "tests/fixtures" / f"{fx}.json").read_text())
+    assert s["location"]["map"]["ok"] and gate(s)

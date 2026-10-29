@@ -16,6 +16,10 @@ on:
         description: "Dry run only: also host the MP4 on GitHub Pages as test-<file> (checks video/mp4) and probe Zernio media storage (no post is created)"
         type: boolean
         default: false
+      test_story:
+        description: "Render test only: path of a saved story fixture (e.g. tests/fixtures/reel-map-tunisia.json). No news fetch, no LLM, never queued"
+        type: string
+        default: ""
 permissions:
   contents: write
   issues: write
@@ -70,9 +74,11 @@ jobs:
           PUBLISHING_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && 'false' || vars.PUBLISHING_ENABLED }}
           # one-line switch (repo variable): "library" = assets/music ACE-Step tracks, "synth" = code-synthesised bed
           MUSIC_SOURCE: ${{ vars.MUSIC_SOURCE || 'library' }}
+          TEST_STORY: ${{ github.event_name == 'workflow_dispatch' && inputs.test_story || '' }}
         run: |
           start=$(date +%s)
-          python -m kahwa_publisher.reels.make --out out
+          if [ -n "$TEST_STORY" ]; then python -m kahwa_publisher.reels.make --out out --dry --story "$TEST_STORY"
+          else python -m kahwa_publisher.reels.make --out out; fi
           echo "seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
       - name: Summary
         if: always()

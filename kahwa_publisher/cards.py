@@ -177,7 +177,7 @@ def find_photo(entity=None, photo_query=None):
 def t_photo(c, d, p, photo, mp):
     y = header(d, p.get("kicker"), p.get("title") or p["headline"], p.get("hl", ()), 2)
     img, credit = photo or mp or (None, "")
-    if img is None:     # no photo and no safe map (e.g. a banned neighbour's gap would show): big text-only card
+    if img is None:     # no photo and no map (e.g. a no-focus territory or unknown country): big text-only card
         f, lines, size = fit(d, p["headline"], W - 128, 84, 56, 5, "ExtraBold")
         lh = int(size * 1.45)
         top = y + 10 + max(0, (H - 150 - (y + 10) - len(lines) * lh) // 2)

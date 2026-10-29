@@ -29,7 +29,7 @@ PROMPT = """أنت محرر فيديو في غرفة أخبار عالمية ا�
 قواعد صارمة:
 - كل رقم تكتبه يجب أن يكون موجوداً حرفياً في المصادر بنفس الأرقام (لا تحسب ولا تقرّب ولا تحوّل الوحدات ولا تكتب أرقاماً غير موجودة). إن لم توجد أرقام كافية فاكتب الوقائع بلا أرقام.
 - لا تخترع أي اسم أو مكان أو تصريح، ولا تضف أسباباً أو تفسيرات أو اتهامات (مثل الإهمال أو التقصير) غير مذكورة حرفياً في المصادر. حياد تام، بلا رأي ولا تهويل ولا صفات انفعالية، بلا إيموجي، بلا روابط.
-- ممنوع منعاً باتاً أي حرب أو عنف: لا هجمات ولا صواريخ ولا مسيرات ولا اعتراض ولا قصف ولا اشتباكات ولا عمليات عسكرية ولا أسلحة، ولا كلمة "حرب" (إن كان الخبر كذلك فاجعل safe = false).
+- أخبار الحروب والنزاعات مسموحة بأسلوب وقائعي هادئ: بلا أي تفاصيل دموية ولا وصف مروّع (لا دماء ولا أشلاء ولا جثث ولا "مجزرة" ولا "مروع")، بلا تهويل، وانسب كل حصيلة وكل ادعاء عسكري إلى قائله دون تبنّي رواية أي طرف.
 - ممنوع منعاً باتاً ذكر المغرب أو الإمارات أو الجزائر أو إسرائيل بأي شكل، وممنوع الرياضة، وممنوع طلب التفاعل (شارك، علّق، تابع...).
 - النسبة: حقل "source" لكل سطر = الجهة الأصلية للمعلومة كما تذكرها المصادر صراحة: جهة رسمية أولاً (وزارة، شرطة، دفاع مدني، سلطات صحية،
   حكومة، وكالة أممية، محكمة، الشركة نفسها، وكالة فضاء، بنك مركزي، مكتب إحصاء) ثم وكالة الأنباء إن كانت هي الأصل (وكالة الصحافة الفرنسية،
@@ -63,7 +63,7 @@ PROMPT = """أنت محرر فيديو في غرفة أخبار عالمية ا�
  "footage_queries": ["...", "..."],
  "place_terms_en": ["أسماء المكان بالإنجليزية وبلغة البلد كما تظهر في عناوين صور ويكيميديا، مثل: Spain, Spanish, España, Toledo"],
  "safe": true}
-اجعل "safe" = false إذا كان الخبر رياضياً أو يذكر الدول الممنوعة أو عن الدين أو يتطلب صوراً عنيفة أو لا يمكن التحقق منه.
+اجعل "safe" = false إذا كان الخبر رياضياً أو لا يُروى دون ذكر الدول الممنوعة أو عن الدين أو لا يُروى إلا بتفاصيل دموية أو كان دعاية لطرف أو لا يمكن التحقق منه.
 إذا لم يوجد في المصادر رقم واضح للعداد فاجعل counter.display فارغاً "".
 
 المصادر:
@@ -118,12 +118,14 @@ def source_block(items, fetch_articles=True):
 
 # ------------------------------------------------------------------ geography
 _GEO = None
+# story text for a location whose map shape carries no label (the shape itself stays unlabelled and is never a map focus)
+PLACE_AR = {"PSE": "فلسطين"}
 
 
 def countries():
     global _GEO
     if _GEO is None:
-        _GEO = {f["properties"]["a"]: f for f in geo.features()}          # banned territories are not in the map data
+        _GEO = {f["properties"]["a"]: f for f in geo.features()}          # incl. the merged, unlabelled Palestine/Israel shape (PSE)
     return _GEO
 
 
@@ -159,8 +161,8 @@ def centroid(iso3):
 
 
 def map_view(iso3, lon, lat):
-    """Safe camera for the reel map scene (geo.reel_map_view): same zoom formula as kahwa.js, then tighter zooms until no
-    banned territory's gap is visible; {"ok": False} -> the map scene is drawn without any map."""
+    """Camera for the reel map scene (geo.reel_map_view): same zoom formula as kahwa.js. {"ok": False} (no-focus
+    territory such as the Palestine/Israel shape, or a point that cannot be framed) -> the scene is drawn without a map."""
     f = countries().get(iso3)
     if not f:
         return {"ok": False}
@@ -213,7 +215,7 @@ def build_story(d, items, src_text, sid, outlets):
     place = _clean(loc.get("place_ar"), 30)
     if lat is None or not point_in_country(lon, lat, iso):
         lon, lat = centroid(iso)
-        place = countries()[iso]["properties"].get("ar") or place
+        place = countries()[iso]["properties"].get("ar") or PLACE_AR.get(iso) or place
     facts = d.get("facts") or []
     if len(facts) < 3:
         raise StoryError("need 3 facts")
@@ -229,7 +231,7 @@ def build_story(d, items, src_text, sid, outlets):
     disp = norm_digits(str(cnt.get("display", "")).strip())
     if not re.fullmatch(r"\d[\d,.]*", disp or "-"):
         disp = ""
-    country_ar = countries()[iso]["properties"].get("ar") or ""
+    country_ar = countries()[iso]["properties"].get("ar") or PLACE_AR.get(iso, "")
     S = {
         "id": sid, "date_ar": date_ar(), "topic_ar": _clean(d.get("topic_ar"), 24),
         "headline": _clean(d.get("headline"), 50), "headline_breaking": _clean(d.get("headline_breaking") or d.get("headline"), 50),
@@ -273,8 +275,8 @@ def build_story(d, items, src_text, sid, outlets):
     if hits:
         raise StoryError(f"banned: {hits}")
     vh = safety.output_hits(vis + " " + " ".join(S["footage_queries"]))
-    if vh:                                     # no war / violence on screen or in the caption (user hard rule)
-        raise StoryError(f"violence/war terms: {vh[:5]}")
+    if vh:                                     # calm factual tone: no graphic / gore wording on screen or in the caption
+        raise StoryError(f"graphic/gore wording: {vh[:5]}")
     # ---- attribution hard gate: no competing outlet on screen; attributions in the text must be in the sources
     vis_all = json.dumps({k: v for k, v in S.items() if k not in ("id", "media", "footage_queries", "place_terms_en")}, ensure_ascii=False)
     oh = A.outlet_hits(vis_all)
@@ -443,6 +445,6 @@ def write_story(llm, items, outlets, sid, fetch_articles=True, log=print, hint=N
         except (StoryError, ValueError) as ex:
             err = str(ex)[:200]
             log(json.dumps({"story_reject": err, "attempt": attempt}, ensure_ascii=False))
-            if "llm marked unsafe" in err or "violence/war" in err or "banned" in err:
+            if "llm marked unsafe" in err or "banned" in err:
                 break                                              # never rewrite an unsafe story into a safe-looking one
     raise StoryError(err or "story failed")

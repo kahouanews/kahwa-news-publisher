@@ -106,22 +106,26 @@ def wiki_photo(entity):
 
 
 # ------------------------------------------------------------------ vector map fallback
-LAST_DRAWN = []          # ISO3 codes drawn by the last map_image() call (tests assert no banned territory is ever in it)
+LAST_DRAWN = []          # ISO3 codes drawn by the last map_image() call
+LAST_LABELS = []         # (iso3, label) pairs written by the last map_image() call (tests: no label on the PSE shape)
 
 
 def map_image(country_en):
-    """Country map (target in red, neighbours in slate). Banned territories (Morocco incl. Western Sahara, UAE, Algeria,
-    Israel) are not in the data at all (geo.features); if their empty space would show inside the frame the crop is
-    tightened once, otherwise None is returned and the caller uses a non-map card."""
+    """Normal country map (owner rules 2026-10-29, see geo.py): every neighbour drawn with its borders and its Arabic name,
+    target in red. The merged Palestine/Israel shape is drawn with no internal border and no text; Western Sahara is its
+    own shape; Morocco / Algeria / UAE are labelled on the map like any country (map label layer only). A map is never
+    focused on Morocco, Algeria, the UAE, Israel or the Palestine/Israel shape -> None (caller uses a non-map card)."""
     from . import geo
     LAST_DRAWN.clear()
+    LAST_LABELS.clear()
     feats = geo.features()
     q = (country_en or "").strip().lower()
-    if not q or any(b in q for b in geo.BANNED_MAP_NAMES):
+    if not q or any(b == q or b in q for b in geo.NO_FOCUS_NAMES):
         return None
-    target = next((f for f in feats if (f["properties"]["n"] or "").lower() == q), None) or \
-        next((f for f in feats if q in (f["properties"]["n"] or "").lower()), None)
-    if not target or geo.is_banned_feature(target):
+    named = [f for f in feats if f["properties"].get("n")]
+    target = next((f for f in named if f["properties"]["n"].lower() == q), None) or \
+        next((f for f in named if q in f["properties"]["n"].lower()), None)
+    if not target or geo.is_no_focus(target):
         return None
 
     def rings(g):
@@ -137,18 +141,10 @@ def map_image(country_en):
     ys = [y for _, y in main]
     cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
     base = max(max(xs) - min(xs), (max(ys) - min(ys)) * W / PH, 12)
-    view = None
-    for mult in ((2.6 if base < 40 else 1.8 if base < 90 else 1.35), 1.12, 1.0):   # normal crop, then tighter crops
-        span = base * mult
-        x0, x1 = cx - span / 2, cx + span / 2
-        yspan = span * PH / W
-        y0, y1 = cy - yspan / 2, cy + yspan / 2
-        if geo.view_clear(x0, y0, x1, y1):
-            view = (x0, y0, x1, y1)
-            break
-    if view is None:
-        return None                                               # a banned territory's gap would show -> no map
-    x0, y0, x1, y1 = view
+    span = base * (2.6 if base < 40 else 1.8 if base < 90 else 1.35)
+    x0, x1 = cx - span / 2, cx + span / 2
+    yspan = span * PH / W
+    y0, y1 = cy - yspan / 2, cy + yspan / 2
     S = 2
     im = Image.new("RGB", (W * S, PH * S), (12, 22, 40))
     d = ImageDraw.Draw(im)
@@ -160,18 +156,71 @@ def map_image(country_en):
     def P(r):
         return [((x - x0) / (x1 - x0) * W * S, (y1 - y) / (y1 - y0) * PH * S) for x, y in r]
 
-    for f in feats:
-        if geo.is_banned_feature(f):                              # never (already absent from the data)
-            continue
-        LAST_DRAWN.append(f["properties"].get("a"))
+    def visible(r):
+        return any(x0 - 2 <= x <= x1 + 2 and y0 - 2 <= y <= y1 + 2 for x, y in r)
+
+    for f in feats:                                              # land + borders (outline = border line)
+        drawn = False
         for r in rings(f["geometry"]):
             for off in (0, 360, -360):
-                d.polygon(P([(x + off, y) for x, y in r]), fill=(32, 46, 72), outline=(60, 78, 110))
+                rr = [(x + off, y) for x, y in r]
+                if visible(rr):
+                    d.polygon(P(rr), fill=(32, 46, 72))
+                    drawn = True
+        if drawn:
+            LAST_DRAWN.append(f["properties"].get("a"))
+    for f in feats:                                              # borders on top so every shared edge shows
+        for r in rings(f["geometry"]):
+            for off in (0, 360, -360):
+                rr = [(x + off, y) for x, y in r]
+                if visible(rr):
+                    d.line(P(rr) + P(rr[:1]), fill=(84, 104, 140), width=2 * S, joint="curve")
     for r in tr:
-        d.polygon(P(r), fill=RED, outline=(255, 120, 100))
+        d.polygon(P(r), fill=RED)
+        d.line(P(r) + P(r[:1]), fill=(255, 120, 100), width=2 * S, joint="curve")
     px, py = (cx - x0) / (x1 - x0) * W * S, (y1 - cy) / (y1 - y0) * PH * S
     for rad, a in ((90, 40), (55, 90)):
         d.ellipse([px - rad * S, py - rad * S, px + rad * S, py + rad * S], outline=(255, 255, 255), width=2 * S)
+    # ---- label layer: Arabic country names (never on the merged Palestine/Israel shape), important countries first,
+    # no overlaps, only where the country is big enough on screen to hold its name
+    f_lab = font("Almarai-Bold.ttf", 26 * S)
+    f_tgt = font("Almarai-ExtraBold.ttf", 36 * S)
+    placed = [(px - 92 * S, py - 92 * S, px + 92 * S, py + 92 * S)]     # never write over the target rings
+    cands = []
+    for f in feats:
+        lab = geo.label_of(f)
+        if not lab:
+            continue
+        p = f["properties"]
+        lx, ly = p.get("l") or (None, None)
+        if lx is None:
+            continue
+        for off in (0, 360, -360):
+            if x0 <= lx + off <= x1 and y0 <= ly <= y1:
+                fr = rings(f["geometry"])
+                fx = [x + off for r in fr for x, _ in r]
+                wpx = (max(fx) - min(fx)) / (x1 - x0) * W * S
+                is_t = f is target
+                cands.append((0 if is_t else 1, p.get("r", 5), -wpx, is_t, lab, lx + off, ly, wpx, p.get("a")))
+    for _k, _r, _w, is_t, lab, lx, ly, wpx, iso in sorted(cands, key=lambda c: c[:3]):
+        fnt = f_tgt if is_t else f_lab
+        tw = d.textlength(lab, font=fnt, direction="rtl", language="ar")
+        if not is_t and wpx < tw * 0.55:
+            continue                                             # country too small on screen for its name
+        X, Y = (lx - x0) / (x1 - x0) * W * S, (y1 - ly) / (y1 - y0) * PH * S
+        if is_t:
+            Y = py + 120 * S if py + 160 * S < PH * S else py - 120 * S     # below the target rings
+            X = px
+        box = (X - tw / 2 - 8, Y - fnt.size * 0.7, X + tw / 2 + 8, Y + fnt.size * 0.7)
+        if box[0] < 10 or box[2] > W * S - 10 or box[1] < 10 or box[3] > PH * S - 10:
+            continue
+        if any(not (box[2] < b[0] or box[0] > b[2] or box[3] < b[1] or box[1] > b[3]) for b in placed[0 if not is_t else 1:]):
+            continue
+        placed.append(box)
+        d.text((X, Y), lab, font=fnt, anchor="mm", direction="rtl", language="ar",
+               fill=(255, 255, 255) if is_t else (176, 190, 214), stroke_width=3 * S if is_t else 2 * S,
+               stroke_fill=(12, 22, 40))
+        LAST_LABELS.append((iso, lab))
     return im.resize((W, PH), Image.LANCZOS), "خريطة: قهوة نيوز (بيانات Natural Earth)"
 
 

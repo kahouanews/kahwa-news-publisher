@@ -37,7 +37,7 @@ AR_STEMS = [
 LATIN = ["morocc\\w*", "rabat", "casablanca", "marrakesh", "emirat\\w*", "uae", "abu dhabi", "dubai", "sharjah",
          "algeri\\w*", "algiers", "oran", "israel\\w*", "tel aviv", "western sahara"]
 SPORTS = ["كرة القدم", "مباراة", "مباريات", "الدوري", "منتخب", "football", "soccer", "match", "league", "fifa", "olympic\\w*"]
-BANNED_ISO = {"MAR", "ARE", "DZA", "ISR", "ESH", "SAH"}
+BANNED_ISO = {"MAR", "ARE", "DZA", "ISR", "ESH", "SAH"}   # story LOCATION ban (text rule); maps draw + label them (geo.py)
 AR_LETTER = "\u0600-\u06FF"
 BAIT = re.compile(r"(شاركوا|انشروا|علّقوا|علقوا|اكتبوا|صوّتوا|صوتوا|تابعونا|اضغط|لايك|منشن|تابع الصفحة|في التعليقات)")
 
@@ -64,14 +64,15 @@ def gate(story):
     if loc.get("country_iso3") in BANNED_ISO:
         hits.append("map:" + loc.get("country_iso3", ""))
     mv = loc.get("map") or {}
-    if mv.get("ok"):                     # re-check the camera: no banned territory's gap may be visible in the map scene
-        from .. import geo
-        if not all(geo.ortho_view_clear(mv["lon"], mv["lat"], sc, 540, mv.get("cy", 600)) for sc in (mv["s0"], mv["s1"])):
-            hits.append("map view shows a banned territory area")
+    from .. import geo
+    if mv.get("ok") and loc.get("country_iso3") in geo.NO_FOCUS_ISO:   # never focus a map on a no-focus territory
+        hits.append("map focused on a no-focus territory: " + str(loc.get("country_iso3")))
     from .. import safety
     vh = safety.output_hits(blob)
-    if vh:                                            # user hard rule: no war / violence in reels
-        hits.append(f"violence/war terms: {vh[:4]}")
+    if vh:                                            # calm factual tone: no graphic / gore wording in reels
+        hits.append(f"graphic/gore wording: {vh[:4]}")
+    if story.get("media") and safety.is_conflict(blob):   # war story: graphic-only reel (map + text), never photos/footage
+        hits.append("war story with photos/footage (must be graphic-only)")
     if story.get("ai_line"):
         hits.append("ai_line present (user hard rule: no AI-assisted line)")
     if BAIT.search(blob):

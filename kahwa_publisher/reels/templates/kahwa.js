@@ -5,11 +5,11 @@
  */
 (function () {
   const R = window.REEL, S = R.story, P = R.plan, STYLE = R.style, M = R.media, BOX = R.box;
-  // HARD RULE: Morocco (+ Western Sahara), UAE, Algeria, Israel are never drawn, outlined, shaded or labelled. They are not
-  // in world.js; this filter is defence in depth. A map is only drawn where story.py found a safe camera (location.map.ok).
-  const BANNED_MAP = ["MAR", "ARE", "DZA", "ISR", "ESH", "SAH"];
-  if (window.WORLD) window.WORLD.features = window.WORLD.features.filter((f) => !BANNED_MAP.includes(String(f.properties.a).toUpperCase()));
-  const MAPOK = !!(S.location && S.location.map && S.location.map.ok && window.WORLD);
+  // MAP RULES (owner 2026-10-29, see geo.py): normal world map, every border drawn, every country labelled with its Arabic
+  // name (properties.ar) - Morocco / Algeria / UAE included (map label layer only). The merged Palestine/Israel shape
+  // (properties.nl = 1) has no internal border and never any text. A map never focuses on a NO_FOCUS territory.
+  const NO_FOCUS = ["MAR", "DZA", "ARE", "ISR", "PSE", "PSX"];
+  const MAPOK = !!(S.location && S.location.map && S.location.map.ok && window.WORLD && !NO_FOCUS.includes(S.location.country_iso3));
   gsap.registerPlugin(CustomEase);
   const E = {
     enter: CustomEase.create("enter", "0.16,1,0.3,1"),
@@ -168,7 +168,7 @@
     tl.fromTo(o, { v: 0 }, { v: to, duration: dur || 1.4, ease: E.count, immediateRender: false, onUpdate: () => (node.textContent = fmt(o.v)) }, t);
   }
 
-  // ---------------------------------------------------------------- map (D3 orthographic, label-free, merged land)
+  // ---------------------------------------------------------------- map (D3 orthographic, borders + Arabic country labels)
   function makeMap(parent, opt) {
     const NS = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(NS, "svg"); svg.setAttribute("class", "map"); svg.setAttribute("viewBox", "0 0 1080 1920");
@@ -180,14 +180,23 @@
     const mk = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); svg.appendChild(e); return e; };
     const sphere = mk("path", { fill: "url(#oc)", stroke: "#2A3142", "stroke-width": 2 });
     const grat = mk("path", { fill: "none", stroke: "rgba(42,49,66,0.55)", "stroke-width": 1 });
-    const land = mk("path", { fill: "#1C2232", stroke: "#1C2232", "stroke-width": 0.8, "stroke-linejoin": "round" });
+    const land = mk("path", { fill: "#1C2232", stroke: "#3B4762", "stroke-width": 1.4, "stroke-linejoin": "round" });
     const sec = mk("path", { fill: "rgba(220,24,12,0)", stroke: "rgba(255,77,64,0)", "stroke-width": 3 });
     const glow = mk("circle", { fill: "url(#hl)", r: 0 });
     const tgt = mk("path", { fill: "#DC180C", "fill-opacity": 0.0, stroke: "#FF4D40", "stroke-width": 3, "stroke-opacity": 0 });
     const ring = mk("circle", { fill: "none", stroke: "#FF4D40", "stroke-width": 4, r: 0, opacity: 0 });
     const dot = mk("circle", { fill: "#fff", stroke: "#DC180C", "stroke-width": 5, r: 0 });
     const feats = WORLD.features;
-    const target = feats.find((f) => f.properties.a === opt.iso3);
+    const target = NO_FOCUS.includes(opt.iso3) ? null : feats.find((f) => f.properties.a === opt.iso3);
+    // label layer: one <text> per labelled country (never the merged Palestine/Israel shape, never the target: its
+    // name is the scene's pill), placed each frame: front hemisphere only, big enough on screen, important first, no overlap
+    const labG = mk("g", { "font-family": "Almarai, sans-serif", "font-weight": 700, "text-anchor": "middle", direction: "rtl" });
+    const LABS = feats.filter((f) => f !== target && !f.properties.nl && f.properties.ar && f.properties.l)
+      .sort((a, b) => (a.properties.r || 5) - (b.properties.r || 5))
+      .map((f) => { const t = document.createElementNS(NS, "text"); t.textContent = f.properties.ar; t.setAttribute("fill", "#AEBBD3");
+        t.setAttribute("stroke", "#0B0F18"); t.setAttribute("stroke-width", 5); t.setAttribute("paint-order", "stroke");
+        t.setAttribute("dominant-baseline", "middle"); labG.appendChild(t); return { f, t }; });
+    const labelsOn = opt.labels !== false;
     const secondary = opt.secIso3 ? feats.find((f) => f.properties.a === opt.secIso3) : null;
     const others = { type: "FeatureCollection", features: feats.filter((f) => f !== target) };
     const graticule = d3.geoGraticule10();
@@ -210,7 +219,32 @@
         const rr = st.ring % 1; ring.setAttribute("r", 14 + 110 * rr); ring.setAttribute("opacity", st.ring > 0 ? (1 - rr) * 0.9 : 0);
         glow.setAttribute("cx", p[0]); glow.setAttribute("cy", p[1]); glow.setAttribute("r", 260 * st.fill);
       }
+      if (labelsOn) placeLabels();
       (opt.onRender || []).forEach((f) => f(proj, st));
+    }
+    function placeLabels() {
+      const boxes = [], ctr = [st.lon, st.lat], fs = Math.round(Math.max(22, Math.min(34, st.scale / 60)));
+      if (pt) { const p = proj([pt.lon, pt.lat]); if (p) boxes.push([p[0] - 130, p[1] - 130, p[0] + 130, p[1] + 130]); }
+      if (target) { const b = path.bounds(target); if (isFinite(b[0][0])) boxes.push([b[0][0], b[0][1], b[1][0], b[1][1]]); }
+      for (const { f, t } of LABS) {
+        t.setAttribute("visibility", "hidden");
+        const b = path.bounds(f);
+        if (!isFinite(b[0][0])) continue;                                      // behind the globe
+        const cb = [Math.max(b[0][0], 40), Math.max(b[0][1], 120), Math.min(b[1][0], 1040), Math.min(b[1][1], 1800)];
+        const w = cb[2] - cb[0], tw = f.properties.ar.length * fs * 0.52;
+        if (!(w >= tw * 0.6) || cb[3] - cb[1] < fs * 1.6) continue;            // too little of the country on screen for its name
+        let p = d3.geoDistance(f.properties.l, ctr) < 1.35 ? proj(f.properties.l) : null;
+        if (!p || p[0] < cb[0] || p[0] > cb[2] || p[1] < cb[1] || p[1] > cb[3]) {
+          // label point off screen: centre of the visible part, only if that spot is inside the country
+          p = [(cb[0] + cb[2]) / 2, (cb[1] + cb[3]) / 2];
+          const ll = proj.invert(p);
+          if (!ll || !d3.geoContains(f, ll)) continue;
+        }
+        const box = [p[0] - tw / 2 - 6, p[1] - fs * 0.7, p[0] + tw / 2 + 6, p[1] + fs * 0.7];
+        if (boxes.some((q) => !(box[2] < q[0] || box[0] > q[2] || box[3] < q[1] || box[1] > q[3]))) continue;
+        boxes.push(box);
+        t.setAttribute("x", p[0]); t.setAttribute("y", p[1]); t.setAttribute("font-size", fs); t.setAttribute("visibility", "visible");
+      }
     }
     render();
     function to(vals, t, d, ease) {

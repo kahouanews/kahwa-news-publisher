@@ -58,6 +58,7 @@ BANNED_COUNTRIES = [
     "إسرائيل", "اسرائيل", "إسرائيلي", "اسرائيلي", "إسرائيلية", "اسرائيلية", "الإسرائيليين", "الاسرائيليين",
     "تل أبيب", "تل ابيب", "نتنياهو", "الكنيست", "كاتس", "آيزنكوت", "هرتسوغ", "الجيش الإسرائيلي", "الاحتلال",
     "مغاربة", "مغرب", "إماراتيين", "اماراتيين", "جزائريين", "إسرائيليين", "اسرائيليين",
+    "إمارات", "امارات", "جزائر",          # bare stems: «للإمارات» / «للجزائر» (ل + لـ, the article absorbed) were slipping through
     "Morocco", "Moroccan", "UAE", "Emirates", "Emirati", "Dubai", "Abu Dhabi", "Algeria", "Algerian", "Israel", "Israeli",
 ]
 
@@ -203,7 +204,7 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 - لا تنسخ أي جملة من المصادر؛ أعد الصياغة كلياً وادمج المعلومات من كل المصادر.
 - الدقة أولاً: كل جملة يجب أن تكون واضحة المعنى ومطابقة لما في المصادر حرفياً من حيث الوقائع.
 - لا تخترع أي رقم أو اسم أو تصريح غير موجود في المصادر. إذا كانت المعلومات غير مؤكدة قل "بحسب التقارير".
-- ممنوع منعاً باتاً أي خبر عن حرب أو عنف: لا هجمات ولا صواريخ ولا مسيرات ولا اعتراض ولا قصف ولا غارات ولا اشتباكات ولا عمليات عسكرية ولا أسلحة ولا ضحايا هجمات، ولا كلمة "حرب". إن كان الخبر كذلك فاجعل safe = false.
+- أخبار الحروب والنزاعات والعمليات العسكرية مسموحة: اكتبها بأسلوب وقائعي هادئ كوكالات الأنباء، بلا أي تفاصيل دموية ولا وصف مروّع (لا دماء ولا أشلاء ولا جثث ولا "مجزرة" ولا "مروع" ولا "بشع")، بلا تهويل، وبلا تبنّي رواية أي طرف: انسب كل حصيلة وكل ادعاء عسكري إلى قائله.
 - ممنوع الأخبار الرياضية تماماً. حياد تام، بلا رأي، بلا سخرية، بلا تحريض، بلا روابط. ممنوع منعاً صارماً ذكر المغرب أو الإمارات أو الجزائر أو إسرائيل بأي شكل.
 - أسلوب صفحات الأخبار العربية الكبرى على فيسبوك: بلا أي إيموجي إطلاقاً.
 - السطر الأول خطّاف قوي بإحدى الصيغ: اقتباس قصير بين علامتي تنصيص ثم ".." ثم الخبر، أو "الجهة: التصريح"، أو سؤال إخباري ثم جوابه. إذا كان عاجلاً ابدأ بـ "#عاجل | ".
@@ -225,7 +226,7 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 {"attribution": ["الجهات الأصلية التي نُسبت إليها المعلومات في المصادر بالترتيب: الرسمية أولاً ثم وكالة الأنباء، بالاسم كما ورد (مثال: وزارة الصحة الإسبانية، وكالة الصحافة الفرنسية). قائمة فارغة إن لم تُذكر أي جهة. لا قنوات ولا مواقع إخبارية"], "subject": "سطر موضوع محايد وواضح من 4 إلى 9 كلمات يقول من/ماذا/أين (مثال: حصيلة تصادم قطارين في إسبانيا)، بلا إثارة ولا سؤال", "headline": "عنوان للصورة لا يتجاوز 70 حرفاً", "highlight": "كلمتان أو ثلاث من العنوان نفسه حرفياً هي الأهم", "category": "كلمة واحدة: سياسة/اقتصاد/علوم/صحة/تكنولوجيا/بيئة/دبلوماسية/دولي", "urgent": true/false, "entity": "عنوان مقالة ويكيبيديا الإنجليزية للشخص أو المكان أو المؤسسة الأبرز في الخبر بالضبط (مثال: Emmanuel Macron)", "photo_query": "2-4 English words to find a relevant real photo", "country_en": "English name of the main country", "post": "نص المنشور كاملاً", "safe": true/false, "card_type": "اختر الأنسب: breaking (خبر عاجل حقيقي) / quote (إذا كان جوهر الخبر تصريحاً منقولاً حرفياً عن شخص مسمى) / numbers (إذا احتوت المصادر على 2-4 أرقام مهمة) / facts (خبر معقد يُشرح في 3-4 نقاط) / photo (الباقي)", "kicker": "كلمة أو كلمتان فوق العنوان: اسم البلد أو الملف (مثال: أوكرانيا، الاقتصاد العالمي)", "title": "عنوان قصير جداً للبطاقة لا يتجاوز 28 حرفاً (الخطّاف)", "subline": "سطر تحت العنوان في البطاقة 50-110 حرفاً يضيف معلومتين جديدتين على الأقل غير موجودتين في العنوان (رقم، مكان، نتيجة، موعد) من المصادر حرفياً", "quote": "للتصريح فقط: نص الاقتباس كما ورد في المصادر حرفياً، أقل من 110 حرفاً", "speaker": "اسم صاحب التصريح بالعربية", "role": "صفته", "numbers": [{"value": "رقم كما ورد في المصادر", "label": "ماذا يعني، 2-4 كلمات"}], "facts": ["نقطة قصيرة أقل من 70 حرفاً"]}
 فضّل numbers أو facts كلما سمحت المصادر بذلك (بطاقات من تصميمنا تشرح الخبر)، فهي أصلية أكثر من صورة مع عنوان.
 البطاقة يجب أن تكون صحيحة 100%: كل رقم واقتباس فيها موجود حرفياً في المصادر، وإلا اختر photo.
-اجعل "safe" = false إذا كان الخبر عن حرب أو هجوم أو عمل عسكري أو عنف مسلح، أو كان رياضياً أو يذكر المغرب أو الإمارات أو الجزائر أو إسرائيل أو عن الدين أو يتضمن عنفاً مصوراً أو معلومات لا يمكن التحقق منها.
+اجعل "safe" = false إذا كان الخبر لا يُروى إلا بتفاصيل دموية أو مروّعة، أو كان دعاية لطرف، أو كان رياضياً أو يذكر المغرب أو الإمارات أو الجزائر أو إسرائيل أو عن الدين أو يتضمن عنفاً مصوراً أو معلومات لا يمكن التحقق منها.
 
 المصادر:
 """
@@ -337,8 +338,8 @@ def write_post(c):
     vh = safety.output_hits(post + " " + " ".join(json.dumps(d.get(k, ""), ensure_ascii=False) for k in
                                                  ("headline", "title", "subline", "kicker", "quote", "highlight", "subject",
                                                   "numbers", "facts", "photo_query", "entity")))
-    if vh:                                                   # no war / violence in anything we publish
-        print(json.dumps({"qa_reason": "violence/war terms in output", "hits": vh[:5]}, ensure_ascii=False))
+    if vh:                                                   # calm factual tone: no graphic / gore wording in what we publish
+        print(json.dumps({"qa_reason": "graphic/gore wording in output", "hits": vh[:5]}, ensure_ascii=False))
         return None
     # fact-check pass: a second, independent read compares every claim with the sources
     chk = llm(CHECK + "\n\nالمصادر:\n" + src + "\n\nالمنشور:\n" + post)
@@ -423,7 +424,7 @@ def write_post(c):
     d["verification"] = v["report"]
     d["post"] = post
     blob = post + " " + (d.get("headline") or "") + " " + (d.get("title") or "")
-    d["no_photo"] = sum(w in blob for w in VIOLENT) >= 1
+    d["no_photo"] = sum(w in blob for w in VIOLENT) >= 1 or safety.is_conflict(blob)   # war story -> own visual, no photo
     sub = d.get("subline") or ""
     if any(n not in src for n in re.findall(r"\d[\d.,]*", sub)) or BAIT.search(sub):
         sub = ""                                    # every figure on the card must exist in the sources
@@ -503,8 +504,6 @@ def card(headline, category, urgent, out):
 
 # ---------------------------------------------------------------- reel story choice
 REELS_SEEN = ROOT / "state" / "reels_seen.json"
-WAR_WORDS = ["قصف", "غارة", "غارات", "تفجير", "هجوم", "اشتباكات", "معارك", "صاروخ", "صواريخ", "مسيّرة", "مسيرة", "مجزرة",
-             "إطلاق نار", "اغتيال", "حرب", "عسكري", "الجيش", "مسلحين", "مسلحون", "إرهاب"]
 
 
 def pick_reel_cluster(min_sources=2):
@@ -527,7 +526,7 @@ def pick_reel_cluster(min_sources=2):
         if len(c["sources"]) < min_sources or blocked(c) or is_seen(seen, c):
             continue
         text = " ".join(i["title"] + " " + i["summary"] for i in c["items"])
-        if any(w in text for w in WAR_WORDS) or not safety.keyword_ok(c):   # no war / violence reels, ever
+        if not safety.keyword_ok(c):            # war stories allowed (graphic-only reel); graphic/gore sources are not
             continue
         words = set(norm(text).split())
         if any((k in text) if " " in k else (norm(k) in words) for k in SPORTS):   # stricter than posts: any sports term
@@ -580,7 +579,7 @@ def main():
         trusted_single = c["sources"][0] in tier1 and c.get("base_score", c["score"]) >= 8
         if not (multi or trusted_single) or blocked(c) or is_seen(seen, c):
             continue
-        if not safety.keyword_ok(c):                 # no war / violence: rejected at selection, before writing
+        if not safety.keyword_ok(c):                 # graphic / gore sources rejected at selection (war news itself allowed)
             continue
         cands.append(c)
         if len(cands) >= 10:

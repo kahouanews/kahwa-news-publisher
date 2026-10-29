@@ -1,7 +1,7 @@
 """Make one reel end to end (run by .github/workflows/reel.yml at the reel slots).
 
-pick the top verified story (>=2 outlets, legal/sports/banned filters, no war stories) -> LLM story.json with
-digit check -> openly licensed footage/photos (Wikimedia Commons, NASA) or graphic-only -> style B if urgent else A
+pick the top verified story (>=2 outlets, legal/sports/banned filters; war news allowed, graphic/gore not) -> LLM story.json
+with digit check -> openly licensed footage/photos (Wikimedia Commons, NASA) or graphic-only (always for war stories) -> style B if urgent else A
 -> HyperFrames render + own music -> hard QA -> out/<id>-reel.mp4 + out/queue-item.json (the workflow uploads the MP4
 to the `reels-media` branch first and only then moves the queue item into queue/).
 
@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import attribution as A
+from .. import safety
 from . import media as M
 from .render import gate, render_story
 from .story import drop_unverifiable_captions, write_story
@@ -158,9 +159,15 @@ def main():
             style0 = "B" if S.get("urgent") else "A"
             media_root = build / "media"
             qs = S.get("footage_queries") or []
-            got, rejected = M.gather(qs, media_root, want=10 if style0 == "A" else 5, story_date=datetime.now(timezone.utc),
-                                     use_nasa=bool(SCIENCE.search(" ".join(qs))), log=log,
-                                     places=S.get("place_terms_en"))
+            vis_txt = json.dumps({k: v for k, v in S.items() if k not in ("source_texts", "source_urls", "media_rejected")},
+                                 ensure_ascii=False)
+            if safety.is_conflict(vis_txt):         # war story: no photos / footage (Meta), graphic-only reel (map + text)
+                got, rejected = {}, []
+                summary["graphic_only"] = "war/conflict story"
+            else:
+                got, rejected = M.gather(qs, media_root, want=10 if style0 == "A" else 5, story_date=datetime.now(timezone.utc),
+                                         use_nasa=bool(SCIENCE.search(" ".join(qs))), log=log,
+                                         places=S.get("place_terms_en"))
             S["media"], S["media_rejected"] = got, rejected[:40]
             summary["media"] = {k: {"page": v["page"], "license": v["license"], "author": v["author"], "archive": v["archive"]}
                                 for k, v in got.items()}

@@ -8,7 +8,11 @@ Fully unattended pipeline for the **Kahwa News** Facebook Page, running free on 
 4. `watchdog` (every 2h): opens a GitHub issue (= email) if nothing was published for hours or a provider lost authorization.
 
 Kill switch: repository variable `PUBLISHING_ENABLED` (must be `true`) or a file `state/PAUSE`.
-Hard content rules enforced in code: never Morocco / UAE / Algeria / Israel (incl. Arabic prefixed forms), no sports, no engagement bait, no AI-disclosure line, no AI images, no AI voice (reels are voice-free), never name a competing news outlet (primary-source attribution only, see below).
+Hard content rules enforced in code: never Morocco / UAE / Algeria / Israel in any text (incl. Arabic prefixed forms), no sports, no engagement bait, no AI-disclosure line, no AI images, no AI voice (reels are voice-free), never name a competing news outlet (primary-source attribution only, see below).
+
+War / conflict news is allowed (owner decision 2026-10-29) in a calm, factual tone (`kahwa_publisher/safety.py`): no graphic / gore wording in anything we publish, graphic sources rejected at selection, a Gemini classifier rejects only graphic, propaganda, unverified, sports and banned-country-dependent stories (fail closed). War stories never get photos or footage: cards use a map / numbers / facts / text card, reels are graphic-only.
+
+Maps (`kahwa_publisher/geo.py`, data built by `tools/maps/build_world.py` from Natural Earth admin-0 1:110m, public domain): a normal world map with every border and every country's Arabic name. Morocco, Algeria and the UAE are drawn and labelled like any country (map label layer only; the text ban above is unchanged). Western Sahara is a separate shape with its border drawn, labelled «الصحراء الغربية». Israel + Palestine are one undivided shape with no label or text. A map is never focused on Morocco, Algeria, the UAE, Israel or the Palestine/Israel shape.
 
 ## Source attribution (user-approved 2026-10-29, `kahwa_publisher/attribution.py`)
 
