@@ -177,6 +177,13 @@ def find_photo(entity=None, photo_query=None):
 def t_photo(c, d, p, photo, mp):
     y = header(d, p.get("kicker"), p.get("title") or p["headline"], p.get("hl", ()), 2)
     img, credit = photo or mp or (None, "")
+    if img is None:     # no photo and no safe map (e.g. a banned neighbour's gap would show): big text-only card
+        f, lines, size = fit(d, p["headline"], W - 128, 84, 56, 5, "ExtraBold")
+        lh = int(size * 1.45)
+        top = y + 10 + max(0, (H - 150 - (y + 10) - len(lines) * lh) // 2)
+        d.line([(W - 64 - 120, top - 40), (W - 64, top - 40)], fill=RED, width=8)
+        draw_rich(d, lines, W - 64, top, f, lh, set(p.get("hl", ())))
+        return credit
     f, lines, size = fit(d, p["headline"], W - 128, 56, 40, 3, "Bold")
     lh = int(size * 1.45)
     text_h = len(lines) * lh

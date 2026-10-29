@@ -344,21 +344,24 @@ def _plain_len(t):
     return len(str(t).replace("[[", "").replace("]]", "").strip())
 
 
-SHORTEN = """اختصر كل سطر من الأسطر التالية إلى الحد الأقصى المذكور من الحروف (بدون احتساب [[ ]]) مع الحفاظ على المعنى نفسه
+SHORTEN = """اختصر كل سطر من الأسطر التالية إلى الطول المطلوب أو أقل (عدد الحروف بما فيها المسافات، بدون احتساب [[ ]]) مع الحفاظ على المعنى نفسه
 والأرقام نفسها حرفياً، دون إضافة أي معلومة جديدة، وبالعربية الفصحى المبسطة. احتفظ بعلامتي [[ ]] حول الكلمة المفتاحية إن وُجدت.
+احذف الكلمات الثانوية والصفات والتفاصيل الأقل أهمية؛ لا تضف أي كلمة جديدة غير موجودة في السطر الأصلي.
 أعد JSON فقط: {"lines": ["السطر 1 بعد الاختصار", "..."]} بنفس الترتيب والعدد.
 
 """
 
 
-def shorten_fields(llm, d, log=print, rounds=2):
+def shorten_fields(llm, d, log=print, rounds=3):
     """Shorten-and-retry: overlong on-screen lines are shortened by the LLM (same facts, same numbers) instead of rejecting
     the whole story. Decorative lines still too long afterwards are dropped; anything else is left for build_story."""
     for r in range(rounds):
         over = [x for x in _slots(d) if _plain_len(x[0][x[1]]) > x[3]]
         if not over:
             return d
-        req = "\n".join(f"{n + 1}. (حتى {lim - 4} حرفاً) {obj[k]}" for n, (obj, k, _key, lim) in enumerate(over))
+        margin = (6, 14, 22)[min(r, 2)]                     # ask for less on every round (LLMs miscount Arabic letters)
+        req = "\n".join(f"{n + 1}. (الطول الحالي {_plain_len(obj[k])} حرفاً، المطلوب {lim - margin} حرفاً أو أقل) {obj[k]}"
+                        for n, (obj, k, _key, lim) in enumerate(over))
         try:
             raw = llm(SHORTEN + req, temperature=0.2)
             lines = json.loads(raw[raw.find("{"): raw.rfind("}") + 1]).get("lines") or []
