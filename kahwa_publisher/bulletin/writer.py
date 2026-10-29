@@ -463,7 +463,9 @@ def write_segment(writer, checker, c, key, fetch_articles=True, brief_only=False
                 anchors = anchors_for(extra["place"] or (valid_place(d["place"]) if isinstance(d.get("place"), dict) else None),
                                       d.get("actor"), q.get("who"), src_text=src)
                 sc_lines = [("title", seg["title"]), ("headline", seg["headline"])]
-                sa_items = [("title", seg["title"], ""), ("headline", seg["headline"], "")] + \
+                # bumper titles (2-3 words) only get the deterministic vague-opener gate: the LLM judge rejected fine
+                # titles such as «هجوم في دنيبرو» / «هجوم تراب الفرنسي» (run 40971888923) and cost whole segments.
+                sa_items = [("headline", seg["headline"], "")] + \
                            [(sh["type"], sh["text"], seg["title"]) for sh in seg["shots"] if sh["type"] in ("strap", "map")]
             probs = screen_problems(lines, src) + self_contained_problems(sc_lines, anchors)
             if probs:
@@ -584,9 +586,10 @@ def build_spec(date, asof, n_main=5, n_brief=3, fetch_articles=True, mode="bulle
             rep.append({"title": c["items"][0]["title"][:90], "ok": bool(br) and not why, "brief": True,
                         **({"error": "overlaps " + why} if why else {}), **{k: v for k, v in meta.items() if k != "place"}})
             if br and not why:
+                log({"brief_ok": br["t"], "s": br["s"]})
                 briefs.append(br)
         if len(briefs) < RD.MIN_BRIEF:    # never fall back to the segments' own one-liners: no section today
-            log({"brief_section_dropped": len(briefs)})
+            log({"brief_section_dropped": len(briefs), "kept_off_screen": [b["t"] for b in briefs]})
             briefs = []
         need = RD.MIN_MAIN
     else:

@@ -506,7 +506,7 @@ def test_body_audio_mix_without_brief_section(monkeypatch, tmp_path):
 def test_writer_drops_story_when_checker_says_unclear_twice(monkeypatch):
     monkeypatch.setattr(W, "verify_lines", lambda ch, lines, src: ([{"claim": "x"}], []))
     monkeypatch.setattr(W, "source_block", lambda items, fetch_articles=True: SRC)
-    chk = _Fake(lambda p: '{"results": [' + ",".join('{"i": %d, "ok": %s}' % (i, "false" if i == 3 else "true") for i in range(1, 9)) + "]}")
+    chk = _Fake(lambda p: '{"results": [' + ",".join('{"i": %d, "ok": %s}' % (i, "false" if i == 1 else "true") for i in range(1, 9)) + "]}")
     seg, br, meta = W.write_segment(_Fake(lambda p: json.dumps(good(), ensure_ascii=False)), chk, _cl("k", "x", []), "s1", fetch_articles=False)
     assert seg is None and "not understandable" in meta["error"]
 
