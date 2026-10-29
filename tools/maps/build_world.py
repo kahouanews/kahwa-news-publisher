@@ -32,6 +32,7 @@ AR_FIX = {"ARE": "الإمارات", "ESH": "الصحراء الغربية", "US
           "DOM": "الدومينيكان", "FLK": "جزر فوكلاند", "ATF": "أراض فرنسية جنوبية", "MKD": "مقدونيا الشمالية",
           "GBR": "بريطانيا", "RUS": "روسيا", "CZE": "التشيك", "KOR": "كوريا الجنوبية", "PRK": "كوريا الشمالية"}
 MERGE = ("ISR", "PSE")            # one undivided, unlabelled shape
+NO_LABEL = {"SOL", "CYN"}         # Somaliland, N. Cyprus: Natural Earth de-facto units, unrecognised -> drawn, never named
 
 
 def rnd(o, nd=3):
@@ -70,6 +71,8 @@ def main():
         name = "Western Sahara" if iso == "ESH" else p["NAME_LONG"] if iso in ("BIH",) else p["NAME"]
         props = {"n": name, "a": iso, "ar": AR_FIX.get(iso, p.get("NAME_AR") or name),
                  "l": [round(p["LABEL_X"], 2), round(p["LABEL_Y"], 2)], "r": p.get("MIN_LABEL", 5)}
+        if iso in NO_LABEL:
+            props["nl"] = 1
         out.append({"type": "Feature", "properties": props, "geometry": rgeom(f["geometry"], 3)})
     assert len(merge_geoms) == 2, "Israel / Palestine not found in the Natural Earth file"
     u = unary_union(merge_geoms).buffer(0.02, join_style=2).buffer(-0.02, join_style=2)   # close slivers: no inner border
