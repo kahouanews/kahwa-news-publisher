@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-resolution="portrait">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1080, height=1920" />
+<title>Kahwa News reel v2</title>
+<script src="gsap.min.js"></script>
+<script src="CustomEase.min.js"></script>
+<script src="d3-array.min.js"></script>
+<script src="d3-geo.min.js"></script>
+<script src="world.js"></script>
+<link rel="stylesheet" href="kahwa.css" />
+</head>
+<body>
+<div id="root" class="style-__STYLE__" data-composition-id="main" data-start="0" data-duration="__DURATION__" data-width="1080" data-height="1920" data-fps="30">
+<div id="ground" class="full"></div>
+__MEDIA__
+<canvas id="glx" width="1080" height="1920"></canvas>
+<div id="gltex" aria-hidden="true">
+__GLTEX__
+</div>
+</div>
+<script>window.REEL = __REEL_JSON__;</script>
+<script src="glx.js"></script>
+<script src="kahwa.js"></script>
+<script>
+  window.__timelines = window.__timelines || {};
+  window.__timelines["main"] = window.KAHWA_TL;
+</script>
+</body>
+</html>

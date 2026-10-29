@@ -1,0 +1,9 @@
+{
+  "name": "kahwa-reels",
+  "private": true,
+  "description": "Pinned HyperFrames renderer for Kahwa News reels (telemetry disabled at runtime: DO_NOT_TRACK=1, HYPERFRAMES_TELEMETRY=0)",
+  "dependencies": {
+    "hyperframes": "0.8.214",
+    "@hyperframes/shader-transitions": "0.8.214"
+  }
+}

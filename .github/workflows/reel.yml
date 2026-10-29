@@ -1,0 +1,121 @@
+name: reel
+# One verified story -> HyperFrames reel (style A explainer, style B if urgent) -> queue as kind "reel".
+# Replaces the old Pillow reel path (kahwa_publisher/reel.py, retired 2026-10-29).
+# Safety: while the repo variable PUBLISHING_ENABLED != "true" (or dry_run is ticked) the run renders + QA's only and
+# uploads the MP4 as a workflow artifact; nothing is queued, nothing is published. A broken reel is never queued.
+on:
+  schedule:
+    - cron: "41 11,17 * * *"   # 12:41 and 18:41 Algeria (the existing reel slots, after the 11:13/17:13 newsroom runs)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Render + QA only (no queue, no media push)"
+        type: boolean
+        default: true
+permissions:
+  contents: write
+  issues: write
+concurrency:
+  group: reels
+  cancel-in-progress: false
+jobs:
+  reel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DO_NOT_TRACK: "1"
+      HYPERFRAMES_TELEMETRY: "0"
+      KAHWA_BUILD: /tmp/kahwa-reel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip, cache-dependency-path: .github/workflows/reel.yml }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: System packages (ffmpeg)
+        run: |
+          if ! command -v ffmpeg >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null; fi
+          ffmpeg -version | head -1
+      - name: Python deps
+        run: pip install -q numpy opencv-python-headless "pillow>=10.1" pyloudnorm feedparser
+      - name: Cache HyperFrames (pinned 0.8.214) + Chrome Headless Shell
+        uses: actions/cache@v4
+        with:
+          path: |
+            kahwa_publisher/reels/node_modules
+            ~/.cache/hyperframes
+            ~/.cache/puppeteer
+          key: hf-0.8.214-${{ runner.os }}-${{ hashFiles('kahwa_publisher/reels/package.json') }}
+      - name: Install HyperFrames + browser
+        run: |
+          test -x kahwa_publisher/reels/node_modules/.bin/hyperframes || npm install --prefix kahwa_publisher/reels --no-audit --no-fund --save-exact
+          cd kahwa_publisher/reels
+          npx hyperframes --version
+          npx hyperframes telemetry disable || true
+          npx hyperframes browser ensure
+          npx hyperframes browser path
+      - name: Make reel
+        id: make
+        timeout-minutes: 30
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PUBLISHING_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && 'false' || vars.PUBLISHING_ENABLED }}
+        run: |
+          start=$(date +%s)
+          python -m kahwa_publisher.reels.make --out out
+          echo "seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+      - name: Summary
+        if: always()
+        run: |
+          echo '### Kahwa reel' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          python -c "import json;d=json.load(open('out/summary.json'));d.get('qa',{}).pop('mean_luma',None);print(json.dumps(d,ensure_ascii=False,indent=1)[:6000])" >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reel-${{ github.run_id }}
+          path: |
+            out/*.mp4
+            out/*.json
+            out/error.txt
+          retention-days: 5
+          if-no-files-found: ignore
+      - name: Upload MP4 to the reels-media branch (only when a queue item was produced)
+        if: success() && hashFiles('out/queue-item.json') != ''
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          set -e
+          F=$(ls out/*-reel.mp4 | head -1)
+          mkdir rmb && cd rmb && git init -q
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git fetch -q --depth=1 origin reels-media; then git checkout -q FETCH_HEAD; fi
+          cut=$(date -u -d '5 days ago' +%Y%m%d)
+          for f in *.mp4; do [ -e "$f" ] || continue; [ "${f:0:8}" -lt "$cut" ] && rm -f "$f"; done
+          cp "../$F" .
+          git checkout -q --orphan new
+          git add -A
+          git -c user.name=kahwa-bot -c user.email=kahwa-bot@users.noreply.github.com commit -qm "reels media $(date -u +%FT%TZ)"
+          git push -qf origin new:reels-media
+          URL=$(python -c "import json;print(json.load(open('../out/queue-item.json'))['media'][0]['url'])")
+          for i in $(seq 1 12); do curl -sfI "$URL" >/dev/null && echo "served: $URL" && exit 0; sleep 10; done
+          echo "MP4 not served at $URL"; exit 1
+      - name: Queue the reel for the dispatcher
+        if: success() && hashFiles('out/queue-item.json') != ''
+        run: |
+          ID=$(python -c "import json;print(json.load(open('out/queue-item.json'))['id'])")
+          mkdir -p queue && cp out/queue-item.json "queue/${ID}.json"
+          git config user.name "kahwa-bot"
+          git config user.email "kahwa-bot@users.noreply.github.com"
+          git add queue state/reels_seen.json
+          git diff --cached --quiet || git commit -m "reel queued ${ID}"
+          for i in 1 2 3 4; do git pull --rebase -q && git push -q && break; sleep 7; done
+      - name: Alert (GitHub issue = email) and skip
+        if: failure()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          { echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"; echo;
+            cat out/error.txt 2>/dev/null || echo "Reel job failed before the renderer wrote an error (see run log). Nothing was queued."; } > alert.txt
+          gh issue create --title "Kahwa reel alert $(date -u +%F' '%H:%M)" --body-file alert.txt || true

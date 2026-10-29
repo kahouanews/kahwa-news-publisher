@@ -60,7 +60,6 @@ MEDIA = ROOT / "media"
 ASSETS = ROOT / "assets"
 REPO = os.getenv("GITHUB_REPOSITORY", "kahouanews/kahwa-news-publisher")
 BRANCH = os.getenv("GITHUB_REF_NAME", "main")
-REEL_HOURS_UTC = {int(h) for h in os.getenv("REEL_HOURS_UTC", "11,17").split(",") if h}
 
 
 # ---------------------------------------------------------------- fetch & cluster
@@ -102,7 +101,7 @@ def fetch():
                 age_h = (time.time() - time.mktime(ts)) / 3600 if ts else 6
                 if title and age_h < 12:
                     items.append({"src": src, "title": title, "summary": summ[:600], "age_h": max(age_h, 0),
-                                  "tok": tokens(title + " " + summ[:200])})
+                                  "link": e.get("link") or "", "tok": tokens(title + " " + summ[:200])})
         except Exception as ex:
             print(json.dumps({"feed_error": src, "err": str(ex)[:120]}, ensure_ascii=False))
     return items
@@ -367,6 +366,39 @@ def card(headline, category, urgent, out):
     im.save(out, "JPEG", quality=92, optimize=True, progressive=True)
 
 
+# ---------------------------------------------------------------- reel story choice
+REELS_SEEN = ROOT / "state" / "reels_seen.json"
+WAR_WORDS = ["قصف", "غارة", "غارات", "تفجير", "هجوم", "اشتباكات", "معارك", "صاروخ", "صواريخ", "مسيّرة", "مسيرة", "مجزرة",
+             "إطلاق نار", "اغتيال", "حرب", "عسكري", "الجيش", "مسلحين", "مسلحون", "إرهاب"]
+
+
+def pick_reel_cluster(min_sources=2):
+    """Top verified story for a reel: >=2 outlets, passes the legal/sports/banned filters, not reeled in 3 days."""
+    try:
+        seen = json.loads(REELS_SEEN.read_text())
+    except Exception:
+        seen = {"stories": []}
+    cutoff = time.time() - 3 * 86400
+    seen["stories"] = [s for s in seen["stories"] if s["t"] > cutoff]
+    for c in cluster(fetch()):
+        if len(c["sources"]) < min_sources or blocked(c) or is_seen(seen, c):
+            continue
+        text = " ".join(i["title"] + " " + i["summary"] for i in c["items"])
+        if sum(w in text for w in WAR_WORDS) >= 2:    # war/violence stories never become reels (no violent imagery)
+            continue
+        words = set(norm(text).split())
+        if any((k in text) if " " in k else (norm(k) in words) for k in SPORTS):   # stricter than posts: any sports term
+            continue
+        return c, seen
+    return None, seen
+
+
+def mark_reeled(seen, c):
+    seen["stories"].append({"t": time.time(), "tok": sorted(c["tok"])[:40], "key": c["key"]})
+    REELS_SEEN.parent.mkdir(exist_ok=True)
+    REELS_SEEN.write_text(json.dumps(seen, ensure_ascii=False))
+
+
 # ---------------------------------------------------------------- main
 def main():
     a = argparse.ArgumentParser()
@@ -421,22 +453,8 @@ def main():
             QUEUE.mkdir(exist_ok=True)
             (QUEUE / f"{sid}.json").write_text(json.dumps(post, ensure_ascii=False, indent=1))
         made += 1
-        # one silent explainer reel at ~12:00 and ~18:00 Algeria (research: reels for non-follower reach, no AI voice)
-        if made == 1 and datetime.now(timezone.utc).hour in REEL_HOURS_UTC and not x.dry:
-            try:
-                from .reel import render_reel
-                from .cards import find_photo
-                vid = MEDIA / f"{sid}-reel.mp4"
-                ph = None if d.get("no_photo") else find_photo(d.get("entity"), d.get("photo_query"))
-                secs = render_reel(d, ph, "، ".join(c["sources"][:3]), vid)
-                if secs:
-                    rp = dict(post, id=sid + "-reel", kind="reel", priority=6,
-                              media=[{"type": "video", "url": url.replace(img.name, vid.name)}],
-                              not_before=datetime.fromtimestamp(time.time() + 3600, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"))
-                    (QUEUE / f"{sid}-reel.json").write_text(json.dumps(rp, ensure_ascii=False, indent=1))
-                    print(json.dumps({"reel": vid.name, "seconds": secs}))
-            except Exception as ex:
-                print(json.dumps({"reel_error": str(ex)[:300]}))
+        # reels are no longer rendered here: .github/workflows/reel.yml (HyperFrames v2 renderer) picks the
+        # top verified story itself at the reel slots (python -m kahwa_publisher.reels.make).
     SEEN.parent.mkdir(exist_ok=True)
     SEEN.write_text(json.dumps(seen, ensure_ascii=False))
     print(json.dumps({"clusters": len(clusters), "queued_now": made}))
