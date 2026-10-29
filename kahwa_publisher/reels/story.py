@@ -242,7 +242,7 @@ def build_story(d, items, src_text, sid, outlets):
                         "role_ar": _clean((d.get("lower_third") or {}).get("role_ar"), 56), "source": (primary or [A.GENERIC])[0]},
         "facts": [{"text": _clean(f.get("text"), 64), "source": src_of(f.get("source"))} for f in facts[:3]],
         "next": {"title_ar": "ماذا بعد؟", "lines": [_clean(x, 60) for x in lines], "sources": [src_of(nsrc[0]), src_of(nsrc[1])]},
-        "breaking_lines": [{"text": _clean(x.get("text"), 60), "source": src_of(x.get("source"))} for x in bl[:4]],
+        "breaking_lines": [{"text": _clean(x.get("text"), 64), "source": src_of(x.get("source"))} for x in bl[:4]],   # 64 = fact limit (facts fill missing lines)
         "ticker": [_clean(x, 90) for x in (d.get("ticker") or [])[:5] if x] or [_clean(f.get("text"), 64).replace("[[", "").replace("]]", "") for f in facts[:3]],
         "sources": primary or [A.GENERIC], "tagline": "أخبار العالم… باختصار",
         "mood": d.get("mood") if d.get("mood") in ("serious", "calm", "light") else "serious",
@@ -307,7 +307,7 @@ def fact_check(llm, S, src):
 # on-screen length limits enforced by build_story (characters without [[ ]]); the writer is asked for a few less
 LIMITS = [("topic_ar", 24), ("headline", 50), ("headline_breaking", 50), ("deck", 64), ("visual_caption", 56),
           ("where_line", 80), ("lower_third.name_ar", 38), ("lower_third.role_ar", 56), ("facts.*.text", 64),
-          ("next.lines.*", 60), ("breaking_lines.*.text", 60), ("ticker.*", 90), ("counter.prefix_ar", 14),
+          ("next.lines.*", 60), ("breaking_lines.*.text", 64), ("ticker.*", 90), ("counter.prefix_ar", 14),
           ("counter.label_ar", 40), ("counter.sub_ar", 50), ("location.place_ar", 30), ("location.region_ar", 30)]
 DROPPABLE = ("visual_caption", "ticker")       # decorative lines: dropped (replaced by verified lines) rather than failing
 
