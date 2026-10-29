@@ -337,7 +337,7 @@ def frames_at(path, times, outdir, prefix="kf"):
     return out
 
 
-def dom_qa(comp, times, outfile, shots=None, timeout=600):
+def dom_qa(comp, times, outfile, shots=None, timeout=1500):
     """DOM safe-zone QA (qa.mjs): Meta 9:16 safe zone, action rail, logo bug, overflow, overlaps, banned names, map label rules."""
     chrome = os.getenv("KAHWA_CHROME") or os.getenv("HYPERFRAMES_BROWSER_PATH")
     if not chrome:
@@ -350,7 +350,7 @@ def dom_qa(comp, times, outfile, shots=None, timeout=600):
     cmd = ["node", str(HERE / "qa.mjs"), str(comp), ",".join(f"{t:.2f}" for t in times), str(shots or "")]
     r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
     if r.returncode:
-        raise RuntimeError(f"DOM QA crashed: {r.stderr[-800:]}")
+        raise RuntimeError(f"DOM QA crashed: {r.stderr[:900]}")
     Path(outfile).write_text(r.stdout)
     d = json.loads(r.stdout)
     viol = [dict(t=x["t"], **v) for x in d["rep"] for v in x["violations"]]

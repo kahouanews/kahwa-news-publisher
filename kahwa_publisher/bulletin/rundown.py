@@ -86,10 +86,10 @@ def in_no_focus(lon, lat):
     return False
 
 
-def visible_no_focus(st, w=1080, h=1920, margin=40):
-    """ISO codes of labelled no-focus countries with any vertex on screen for camera state st."""
+def visible_no_focus(st, w=1080, h=1920, margin=40, isos=_LABELLED_NO_FOCUS):
+    """ISO codes of labelled no-focus countries (or `isos`) with any vertex on screen for camera state st."""
     out = []
-    for iso in _LABELLED_NO_FOCUS:
+    for iso in isos:
         f = _feat(iso)
         if not f:
             continue
@@ -117,12 +117,19 @@ def tighten(st, point=None, ks=(1.0, 1.25, 1.55, 1.9, 2.3)):
         if in_no_focus(st["lon"], st["lat"]):
             raise RundownError("story point inside a no-focus shape")
     base = st["scale"]
+    fallback = None
     for k in ks:
         cand = dict(st, scale=round(base * k))
         if point and not point_on_screen(cand, point["lon"], point["lat"]):
             break
         if not visible_no_focus(cand):
             return cand, True
+        if fallback is None and not visible_no_focus(cand, isos=("ESH",)):
+            fallback = cand
+    # Western Sahara in view forces the «الصحراء الغربية» + «المغرب» label pair (owner rule); when the no-focus shapes cannot
+    # all be cleared, at least keep Western Sahara out of frame (QA rejects a frame where the pair is incomplete).
+    if visible_no_focus(st, isos=("ESH",)) and fallback is not None:
+        return fallback, False
     return st, not visible_no_focus(st)
 
 
@@ -136,6 +143,8 @@ def safe_map(mp):
     if "s0" in mp and "s1" in mp:
         if mp["s0"]["scale"] > mp["s1"]["scale"]:
             mp["s0"]["scale"] = round(mp["s1"]["scale"] * 0.85)      # keep the push-in direction
+        if visible_no_focus(mp["s0"], isos=("ESH",)) and not visible_no_focus(mp["s1"], isos=("ESH",)):
+            mp["s0"] = dict(mp["s1"], scale=round(mp["s1"]["scale"] * 0.94))
         if visible_no_focus(mp["s0"]) and not visible_no_focus(mp["s1"]):
             # the opening frame would still show a no-focus label (Yemen -> «الإمارات»): open from the final framing instead
             for k in (0.88, 0.94, 1.0):
@@ -147,18 +156,35 @@ def safe_map(mp):
 
 
 def map_from_place(place):
-    """{"iso3","lon","lat","label"} (validated by the writer) -> map dict for the body template, or None."""
-    from ..reels.story import map_view
+    """{"iso3","lon","lat","label"} (validated by the writer) -> map dict for the body template, or None.
+    Zoom from the country part that holds the story point (not the whole feature: France + French Guiana would give a
+    hemisphere view with hundreds of labels), pilot-like framing: s0 = that part's centre, s1 = pushed towards the point."""
     if not place or place.get("iso3") in geo.NO_FOCUS_ISO:
         return None
-    v = map_view(place["iso3"], place["lon"], place["lat"])
-    if not v.get("ok"):
+    f = _feat(place["iso3"])
+    if not f or geo.is_no_focus(f):
         return None
-    pt = {"lon": place["lon"], "lat": place["lat"], "label": place.get("label") or ""}
-    s1 = {"lon": round((v["lon"] + place["lon"]) / 2, 3), "lat": round((v["lat"] + place["lat"]) / 2, 3),
-          "scale": v["s1"], "cy": 560, "tfo": 0.08}
-    s0 = dict(s1, lon=v["lon"], lat=v["lat"], scale=v["s0"])
-    return safe_map({"iso3": place["iso3"], "point": pt, "s0": s0, "s1": s1})
+    lon, lat = float(place["lon"]), float(place["lat"])
+    rings = _rings(f)
+    holder = [r for r in rings if _inside(lon, lat, r)]
+    if holder:
+        ring = holder[0]
+    else:
+        ring = min(rings, key=lambda r: min((x - lon) ** 2 + (y - lat) ** 2 for x, y in r))
+    xs, ys = [p[0] for p in ring], [p[1] for p in ring]
+    cx, cy_ = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
+    ext = max((max(xs) - min(xs)) * math.cos(math.radians(cy_)), max(ys) - min(ys), 2.0)
+    s1 = max(1500, min(8000, 1.6 * 560 / math.radians(ext)))
+    st1 = {"lon": round((cx + lon) / 2, 3), "lat": round((cy_ + lat) / 2, 3), "scale": round(s1), "cy": 560, "tfo": 0.08}
+    for _ in range(8):                                   # keep the story point framed
+        if point_on_screen(st1, lon, lat):
+            break
+        st1["scale"] = round(st1["scale"] * 0.85)
+    st0 = dict(st1, lon=round(cx, 3), lat=round(cy_, 3), scale=round(st1["scale"] * 0.85))
+    if in_no_focus(st0["lon"], st0["lat"]):
+        st0.update(lon=st1["lon"], lat=st1["lat"])
+    pt = {"lon": lon, "lat": lat, "label": place.get("label") or ""}
+    return safe_map({"iso3": place["iso3"], "point": pt, "s0": st0, "s1": st1})
 
 
 # ------------------------------------------------------------------ build

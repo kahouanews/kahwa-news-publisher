@@ -211,3 +211,19 @@ def test_prune_drops_only_optional_unsupported_lines():
     rows = [r["t"] for s in pr["shots"] if s["type"] == "next" for r in s["rows"]]
     assert "البرلمان يستدعي وزير النقل" not in rows and len(rows) == 2
     assert W.prune(seg, brief, [{"claim": "x", "span": "اصطدام قطارين قرب طليطلة صباح الأربعاء"}]) is None   # required strap
+
+
+def test_generated_map_zoom_uses_the_part_holding_the_point():
+    # France's feature includes French Guiana: zooming on the whole feature gave a hemisphere view (hundreds of labels)
+    m = RD.map_from_place({"iso3": "FRA", "lon": 2.03, "lat": 48.77, "label": "تراب"})
+    assert m["s0"]["scale"] >= 1500 and m["s1"]["scale"] >= m["s0"]["scale"]
+    assert RD.point_on_screen(m["s1"], 2.03, 48.77)
+    y = RD.map_from_place({"iso3": "YEM", "lon": 44.02, "lat": 13.58, "label": "تعز"})
+    assert not RD.visible_no_focus(y["s0"]) and not RD.visible_no_focus(y["s1"])
+    assert RD.map_from_place({"iso3": "MAR", "lon": -6.8, "lat": 34.0, "label": "x"}) is None
+
+
+def test_spain_map_keeps_western_sahara_out_of_frame():
+    m = RD.map_from_place({"iso3": "ESP", "lon": -3.72, "lat": 39.41, "label": "أوردا"})
+    for k in ("s0", "s1"):
+        assert not RD.visible_no_focus(m[k], isos=("ESH",))

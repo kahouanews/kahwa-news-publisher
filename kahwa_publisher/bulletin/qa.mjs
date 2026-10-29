@@ -9,9 +9,12 @@ const dir=process.argv[2]; const times=process.argv[3].split(',').map(Number); c
 const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.ttf':'font/ttf','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.json':'application/json'};
 const srv=http.createServer((q,r)=>{let u=decodeURIComponent(q.url.split('?')[0]); const f=path.join(dir,u==='/'?'index.html':u);
   fs.readFile(f,(e,d)=>{if(e){r.writeHead(404);r.end();return} r.writeHead(200,{'content-type':types[path.extname(f)]||'application/octet-stream'}); r.end(d)})}).listen(+process.env.PORT||8766,'127.0.0.1');
-const b=await puppeteer.launch({executablePath:process.env.CHROME,args:['--no-sandbox','--use-angle=swiftshader','--font-render-hinting=none']});
+const b=await puppeteer.launch({executablePath:process.env.CHROME,protocolTimeout:900000,args:['--no-sandbox','--use-angle=swiftshader','--font-render-hinting=none']});
 const p=await b.newPage(); const errs=[]; p.on('console',m=>{if(m.type()==='error'||m.type()==='warning')errs.push(m.text())}); p.on('pageerror',e=>errs.push(String(e)));
-await p.setViewport({width:1080,height:1920}); await p.goto('http://127.0.0.1:'+(process.env.PORT||8766)+'/',{waitUntil:'networkidle0'});
+p.setDefaultTimeout(600000); p.setDefaultNavigationTimeout(600000);
+await p.setViewport({width:1080,height:1920}); await p.goto('http://127.0.0.1:'+(process.env.PORT||8766)+'/',{waitUntil:'load'});
+for(let i=0;i<1200;i++){ if(await p.evaluate(()=>!!(window.__timelines&&window.__timelines.main))) break; await new Promise(r=>setTimeout(r,500)); }
+if(process.env.QA_DEBUG) console.error('ready');
 await p.evaluate(()=>document.fonts.ready);
 const BANNED=["المغرب","الإمارات","الجزائر","إسرائيل","اسرائيل","Morocco","Algeria","Israel","UAE"];
 const rep=[];

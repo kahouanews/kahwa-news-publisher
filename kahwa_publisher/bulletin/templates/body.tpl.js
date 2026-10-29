@@ -172,7 +172,7 @@
 
   // ------------------------------------------------------------------ lower zone: rundown rail (non-critical furniture)
   const rail = el("div", "rundown", railL); rail.setAttribute("data-nc", "1");
-  const rh = el("div", "rd-head", rail); el("span", "rd-title", rh, "في هذه النشرة"); el("span", "rd-asof", rh, bidi(B.asof));
+  const rh = el("div", "rd-head", rail); el("span", "rd-title", rh, "في هذا العدد"); el("span", "rd-asof", rh, bidi(B.asof));
   const RROWS = B.segs.map((g, i) => { const r = el("div", "rd-row", rail); el("span", "rd-n", r, String(i + 1).padStart(2, "0")); el("span", "rd-t", r, esc(g.t)); return r; });
   const dateL = el("div", "rd-date", rail, esc(B.date));
   function railState(t, cur, done) {   // cur: highlighted index (-1 none); done: indices before cur are dimmed
@@ -244,6 +244,9 @@
       const tg = el("div", "btag", sc, esc(s.tag));
       tl.fromTo(tg, { clipPath: "inset(0 0 0 100%)" }, { clipPath: "inset(0 0 0 0%)", duration: 0.3, ease: E.enter, immediateRender: true }, t + 0.25);
       const ti = el("div", "btitle", sc); const r = rich(ti, s.title); wordsIn(r.words, t + 0.35);
+      // one line only (a 2-line title would reach the Meta action rail, y > 1152): shrink long generated titles
+      const tlen = String(s.title).replace(/\[\[|\]\]/g, "").length;
+      ti.style.whiteSpace = "nowrap"; ti.style.fontSize = Math.min(110, Math.floor(900 / (tlen * 0.62))) + "px";
       const lg = el("div", "blogo", sc); const k1 = el("img", "", lg); k1.src = "logo-kahwa.svg"; const k2 = el("img", "", lg); k2.src = "logo-band.svg";
       tl.to([num, ti, tg], { autoAlpha: 0, x: -60, duration: 0.2, ease: E.exit }, t + d - 0.22);
     } else if (s.type === "strap") {
