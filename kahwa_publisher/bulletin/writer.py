@@ -25,13 +25,14 @@ SEG_PROMPT = """أنت محرر أول في نشرة أخبار تلفزيوني
 عن الخبر التالي بالعربية الفصحى المبسطة، اعتماداً فقط على الوقائع الواردة في المصادر أدناه.
 قواعد صارمة:
 - كل رقم تكتبه موجود حرفياً في المصادر بالأرقام نفسها (لا حساب ولا تقريب ولا تحويل). لا أرقام غير موجودة.
-- لا تخترع اسماً أو مكاناً أو تصريحاً أو سبباً أو سياقاً. حياد تام بلا رأي ولا تهويل ولا صفات انفعالية. انسب كل حصيلة وكل ادعاء إلى قائله.
+- لا تخترع اسماً أو مكاناً أو تصريحاً أو سبباً أو سياقاً، ولا تضف أي معلومة خلفية غير مكتوبة نصاً في المصادر (مثل وصف مدينة
+  أو تاريخها أو أهميتها، أو "تستمر التحقيقات"، أو زيارات وتصريحات لم تُذكر). كل سطر يجب أن يقابله نص صريح في المصادر. حياد تام بلا رأي ولا تهويل ولا صفات انفعالية. انسب كل حصيلة وكل ادعاء إلى قائله.
 - أخبار الحروب مسموحة بأسلوب وقائعي هادئ بلا أي تفاصيل دموية (لا دماء ولا أشلاء ولا جثث ولا "مجزرة" ولا "مروع").
 - ممنوع منعاً باتاً ذكر المغرب أو الإمارات أو الجزائر أو إسرائيل بأي صيغة، وممنوع الرياضة، وممنوع طلب التفاعل.
 - ممنوع ذكر أي قناة أو موقع إخباري أو صحيفة في أي حقل. "sources" = الجهات الأصلية التي تقول المصادر صراحة إنها أعلنت المعلومة
   (جهة رسمية أولاً، ثم وكالة أنباء: رويترز، أسوشيتد برس، الوكالة الفرنسية…) وإلا قائمة فارغة. المصادر مرقمة [م1] [م2] فقط.
 - ضع الكلمة الأهم (كلمة إلى ثلاث) بين [[ ]] مرة واحدة على الأكثر في كل سطر.
-- الأطوال إلزامية (تُعدّ الحروف بدون [[ ]]): title حتى 18، tag حتى 12، headline حتى 52، strap حتى 58، map_line حتى 58،
+- الأطوال إلزامية (تُعدّ الحروف بدون [[ ]]): title حتى 22، tag حتى 12، headline حتى 52، strap حتى 58، map_line حتى 58،
   number.label حتى 30، number.deck حتى 52، quote.text حتى 52، quote.who حتى 24، quote.role حتى 30، كل سطر في next.rows حتى 50، brief حتى 44.
 - place: المكان الرئيسي للخبر (مدينة أو منطقة) بإحداثيات دقيقة داخل البلد، أو null إن لم يكن للخبر مكان واحد واضح.
   label اسم المكان بالعربية حتى 20 حرفاً.
@@ -63,7 +64,7 @@ BRIEF_PROMPT = """أنت محرر نشرة أخبار. اكتب الخبر ال�
 R.register(SEG_PROMPT, {"headline": str, "title": str})
 R.register(BRIEF_PROMPT, {"brief": str})
 
-LIM = {"title": 18, "tag": 12, "headline": 52, "strap": 58, "map_line": 58, "label": 30, "deck": 52, "qtext": 52, "who": 24,
+LIM = {"title": 26, "tag": 12, "headline": 52, "strap": 58, "map_line": 58, "label": 30, "deck": 52, "qtext": 52, "who": 24,
        "role": 30, "row": 50, "brief": 44, "place_label": 20}
 
 
@@ -198,6 +199,52 @@ def seg_lines(seg, brief):
     return [x for x in out if x and x.strip()]
 
 
+def _owner_lines(seg, brief):
+    """[(line, owner)]: owner None = required (title/headline/brief/first strap/place label), else ("shot", i) or ("row", i, j)."""
+    out = [(seg["title"], None), (seg["headline"], None), (brief, None)]
+    for i, s in enumerate(seg["shots"]):
+        if s["type"] == "next":
+            out.append((s["title"], ("shot", i)))
+            out += [(r["t"], ("row", i, j)) for j, r in enumerate(s["rows"])]
+        else:
+            out += [(t, None if i == 0 else ("shot", i)) for t in RD._shot_texts(s) if t and t.strip()]
+    if seg.get("map") and seg["map"]["point"].get("label"):
+        out.append((seg["map"]["point"]["label"], None))
+    return out
+
+
+def prune(seg, brief, bad):
+    """Drop the OPTIONAL shots / «ماذا بعد» rows that carry unsupported claims (like the reel caption drop). Returns a new seg,
+    or None when an unsupported claim sits in a required line or fewer than 2 shots would remain."""
+    from ..verify import _clitic, _toks
+    owners = _owner_lines(seg, brief)
+
+    def overlap(a, b):
+        A_ = {_clitic(w) for w in _toks(a)}
+        B_ = [_clitic(w) for w in _toks(b)]
+        return sum(w in A_ for w in B_) / max(1, len(B_))
+    drop_shots, drop_rows = set(), set()
+    for b in bad:
+        probe = b.get("span") or b.get("claim") or ""
+        best = max(owners, key=lambda o: overlap(o[0].replace("[[", "").replace("]]", ""), probe))
+        if overlap(best[0], probe) < 0.5 or best[1] is None:
+            return None
+        if best[1][0] == "shot":
+            drop_shots.add(best[1][1])
+        else:
+            drop_rows.add(best[1][1:])
+    seg = json.loads(json.dumps(seg, ensure_ascii=False))
+    for i, s in enumerate(seg["shots"]):
+        if s["type"] == "next":
+            s["rows"] = [r for j, r in enumerate(s["rows"]) if (i, j) not in drop_rows]
+            for k, r in enumerate(s["rows"]):
+                r["i"] = str(k + 1)
+            if len(s["rows"]) < 2:
+                drop_shots.add(i)
+    seg["shots"] = [s for i, s in enumerate(seg["shots"]) if i not in drop_shots]
+    return seg if len(seg["shots"]) >= 2 else None
+
+
 def verify_lines(checker, lines, src_text):
     srcs = [p.strip() for p in re.split(r"\n(?=- \[)", src_text) if p.strip()]
     txt = "\n".join(dict.fromkeys(l.replace("[[", "").replace("]]", "") for l in lines))
@@ -234,6 +281,13 @@ def write_segment(writer, checker, c, key, fetch_articles=True, brief_only=False
             if probs:
                 raise ValueError("; ".join(probs[:4]))
             claims, bad = verify_lines(checker, lines, src)
+            if bad and seg is not None:
+                pr = prune(seg, brief["t"], bad)
+                if pr is not None:                # unsupported optional lines dropped: verify what is left once more
+                    log({"bulletin_pruned": c["items"][0]["title"][:70], "dropped": [b.get("claim", "")[:80] for b in bad[:5]]})
+                    seg = pr
+                    lines = seg_lines(seg, brief["t"])
+                    claims, bad = verify_lines(checker, lines, src)
             if bad:
                 raise ValueError("unsupported: " + " | ".join(b["claim"] for b in bad[:5]))
             meta = {"outlets": c["sources"], "claims": len(claims), "attempts": attempt + 1, **extra}

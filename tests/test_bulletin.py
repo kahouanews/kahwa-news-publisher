@@ -201,3 +201,13 @@ def test_writer_fail_closed_without_checker(monkeypatch):
     monkeypatch.setattr(W.R, "bound", bound)
     with pytest.raises(RD.RundownError, match="only 0 verified"):
         W.build_spec("2026-10-29", "06:30", fetch_articles=False)
+
+
+def test_prune_drops_only_optional_unsupported_lines():
+    d = good()
+    d["next"] = {"title": "ماذا [[بعد؟]]", "rows": ["القضاء يفتح تحقيقاً في الحادث", "تعليق حركة القطارات السريعة", "البرلمان يستدعي وزير النقل"]}
+    seg, brief, _ = W.seg_from(d, "s1", SRC)
+    pr = W.prune(seg, brief, [{"claim": "البرلمان استدعى وزير النقل", "span": "البرلمان يستدعي وزير النقل"}])
+    rows = [r["t"] for s in pr["shots"] if s["type"] == "next" for r in s["rows"]]
+    assert "البرلمان يستدعي وزير النقل" not in rows and len(rows) == 2
+    assert W.prune(seg, brief, [{"claim": "x", "span": "اصطدام قطارين قرب طليطلة صباح الأربعاء"}]) is None   # required strap
