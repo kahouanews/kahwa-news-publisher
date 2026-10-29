@@ -4,7 +4,13 @@ fetch Arabic world-news RSS -> cluster the same story across outlets -> rank by 
 outlets cover it and freshness -> legal/safety filter -> AI writes an ORIGINAL Arabic post
 (no copying, no links) -> branded 1080x1350 card -> queue for the dispatcher.
 
-python -m kahwa_publisher.newsroom [--max 2] [--dry]
+Edge layer (2026-10-29): early-warning ranking (signals.py: GDELT breadth + Wikipedia pageview spikes; ranking only,
+the >=2-outlet rule is unchanged), fixed named series («بالأرقام» numbers cards: series tag on the card + caption first
+line "بالأرقام | <subject>"), and a second verification layer (verify.py: claim decomposition, every atomic claim must
+be supported by a source text, unsupported claims are repaired once, otherwise the story is dropped - fail closed).
+
+python -m kahwa_publisher.newsroom [--max 2] [--dry] [--out DIR]
+  --dry: writes nothing to queue/, state/ or media/ (cards + JSON go to --out, default /tmp/kahwa-dry) - test runs.
 """
 import argparse
 import hashlib
@@ -16,7 +22,11 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import signals
 from .dispatcher import QUEUE, ROOT
+from .verify import check as verify_check, verify_text
+
+SERIES_NUMBERS = "بالأرقام"
 
 FEEDS = {
     "BBC عربي": "https://feeds.bbci.co.uk/arabic/rss.xml",
@@ -189,7 +199,7 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 - لغة محايدة: افصل الوقائع عن التصريحات ("قال"، "بحسب")، بلا تهويل ولا صفات انفعالية.
 - قيمة مضافة (قاعدة الأصالة في فيسبوك): أجب ضمنياً عن "لماذا يهم هذا؟" أو "ماذا بعد؟" بجملة واحدة مستندة إلى المصادر.
 أعد JSON فقط بهذا الشكل:
-{"headline": "عنوان للصورة لا يتجاوز 70 حرفاً", "highlight": "كلمتان أو ثلاث من العنوان نفسه حرفياً هي الأهم", "category": "كلمة واحدة: سياسة/اقتصاد/علوم/صحة/تكنولوجيا/بيئة/دبلوماسية/دولي", "urgent": true/false, "entity": "عنوان مقالة ويكيبيديا الإنجليزية للشخص أو المكان أو المؤسسة الأبرز في الخبر بالضبط (مثال: Emmanuel Macron)", "photo_query": "2-4 English words to find a relevant real photo", "country_en": "English name of the main country", "post": "نص المنشور كاملاً", "safe": true/false, "card_type": "اختر الأنسب: breaking (خبر عاجل حقيقي) / quote (إذا كان جوهر الخبر تصريحاً منقولاً حرفياً عن شخص مسمى) / numbers (إذا احتوت المصادر على 2-4 أرقام مهمة) / facts (خبر معقد يُشرح في 3-4 نقاط) / photo (الباقي)", "kicker": "كلمة أو كلمتان فوق العنوان: اسم البلد أو الملف (مثال: أوكرانيا، الاقتصاد العالمي)", "title": "عنوان قصير جداً للبطاقة لا يتجاوز 28 حرفاً (الخطّاف)", "subline": "سطر تحت العنوان في البطاقة 50-110 حرفاً يضيف معلومتين جديدتين على الأقل غير موجودتين في العنوان (رقم، مكان، نتيجة، موعد) من المصادر حرفياً", "quote": "للتصريح فقط: نص الاقتباس كما ورد في المصادر حرفياً، أقل من 110 حرفاً", "speaker": "اسم صاحب التصريح بالعربية", "role": "صفته", "numbers": [{"value": "رقم كما ورد في المصادر", "label": "ماذا يعني، 2-4 كلمات"}], "facts": ["نقطة قصيرة أقل من 70 حرفاً"]}
+{"subject": "سطر موضوع محايد وواضح من 4 إلى 9 كلمات يقول من/ماذا/أين (مثال: حصيلة تصادم قطارين في إسبانيا)، بلا إثارة ولا سؤال", "headline": "عنوان للصورة لا يتجاوز 70 حرفاً", "highlight": "كلمتان أو ثلاث من العنوان نفسه حرفياً هي الأهم", "category": "كلمة واحدة: سياسة/اقتصاد/علوم/صحة/تكنولوجيا/بيئة/دبلوماسية/دولي", "urgent": true/false, "entity": "عنوان مقالة ويكيبيديا الإنجليزية للشخص أو المكان أو المؤسسة الأبرز في الخبر بالضبط (مثال: Emmanuel Macron)", "photo_query": "2-4 English words to find a relevant real photo", "country_en": "English name of the main country", "post": "نص المنشور كاملاً", "safe": true/false, "card_type": "اختر الأنسب: breaking (خبر عاجل حقيقي) / quote (إذا كان جوهر الخبر تصريحاً منقولاً حرفياً عن شخص مسمى) / numbers (إذا احتوت المصادر على 2-4 أرقام مهمة) / facts (خبر معقد يُشرح في 3-4 نقاط) / photo (الباقي)", "kicker": "كلمة أو كلمتان فوق العنوان: اسم البلد أو الملف (مثال: أوكرانيا، الاقتصاد العالمي)", "title": "عنوان قصير جداً للبطاقة لا يتجاوز 28 حرفاً (الخطّاف)", "subline": "سطر تحت العنوان في البطاقة 50-110 حرفاً يضيف معلومتين جديدتين على الأقل غير موجودتين في العنوان (رقم، مكان، نتيجة، موعد) من المصادر حرفياً", "quote": "للتصريح فقط: نص الاقتباس كما ورد في المصادر حرفياً، أقل من 110 حرفاً", "speaker": "اسم صاحب التصريح بالعربية", "role": "صفته", "numbers": [{"value": "رقم كما ورد في المصادر", "label": "ماذا يعني، 2-4 كلمات"}], "facts": ["نقطة قصيرة أقل من 70 حرفاً"]}
 فضّل numbers أو facts كلما سمحت المصادر بذلك (بطاقات من تصميمنا تشرح الخبر)، فهي أصلية أكثر من صورة مع عنوان.
 البطاقة يجب أن تكون صحيحة 100%: كل رقم واقتباس فيها موجود حرفياً في المصادر، وإلا اختر photo.
 اجعل "safe" = false إذا كان الخبر رياضياً أو يذكر المغرب أو الإمارات أو الجزائر أو إسرائيل أو عن الدين أو يتضمن عنفاً مصوراً أو معلومات لا يمكن التحقق منها.
@@ -198,8 +208,9 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 """
 
 
-def llm(prompt):
-    """Gemini free tier first, then any OpenAI-compatible free endpoint (Groq, OpenRouter)."""
+def llm(prompt, temperature=0.6):
+    """Gemini free tier first, then any OpenAI-compatible free endpoint (Groq, OpenRouter). If all fail the caller
+    skips the story (skip-on-failure: nothing is queued, the next scheduled run tries again)."""
     errs = []
     gk = os.getenv("GEMINI_API_KEY")
     if gk:
@@ -208,7 +219,7 @@ def llm(prompt):
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
                 body = {"contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {"temperature": 0.6, "responseMimeType": "application/json"}}
+                        "generationConfig": {"temperature": temperature, "responseMimeType": "application/json"}}
                 req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
                                              headers={"Content-Type": "application/json", "x-goog-api-key": gk})
                 r = json.loads(urllib.request.urlopen(req, timeout=90).read())
@@ -228,7 +239,7 @@ def llm(prompt):
         if not k:
             continue
         try:
-            body = {"model": os.getenv(model_env, default), "temperature": 0.6,
+            body = {"model": os.getenv(model_env, default), "temperature": temperature,
                     "response_format": {"type": "json_object"},
                     "messages": [{"role": "user", "content": prompt}]}
             req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode(), method="POST",
@@ -286,6 +297,40 @@ def write_post(c):
     if "المصادر" not in post or re.search("[\U0001F300-\U0001FAFF\u2600-\u27BF]", post) or len(post) > 900:
         print(json.dumps({"qa_reason": "structure"}))
         return None
+    # ---- fixed named series: numbers cards are «بالأرقام» (series tag on the card, subject stated on caption line 1)
+    if (d.get("card_type") or "") == "numbers" and len(d.get("numbers") or []) >= 2 and (d.get("subject") or "").strip():
+        d["series"] = SERIES_NUMBERS
+        d["kicker"] = SERIES_NUMBERS
+        subj = re.sub(r"[#|\n]+", " ", d["subject"]).strip()[:80]
+        post = f"{SERIES_NUMBERS} | {subj}\n" + re.sub(r"^#عاجل \| ", "", post)
+    # ---- second verification layer: atomic claims vs source texts (fail closed)
+    sources = [f"[{i['src']}] {i['title']} — {i['summary'][:600]}" for i in c["items"][:6]]
+    v = verify_text(llm, post, sources, kind="post")
+    if not v:
+        print(json.dumps({"qa_reason": "claim verification failed"}))
+        return None
+    post = v["text"]
+    card_lines = [d.get("headline"), d.get("title"), d.get("subline"), d.get("quote")] + list(d.get("facts") or []) + \
+                 [f"{n.get('value', '')} {n.get('label', '')}" for n in (d.get("numbers") or []) if isinstance(n, dict)]
+    card_text = "\n".join(x.strip() for x in card_lines if isinstance(x, str) and x.strip())
+    if card_text:
+        try:
+            _claims, bad = verify_check(llm, card_text, sources)
+        except Exception as ex:
+            print(json.dumps({"qa_reason": f"card verification error (fail closed): {str(ex)[:120]}"}))
+            return None
+        if bad:
+            print(json.dumps({"qa_reason": "card claims unsupported", "claims": [b["claim"] for b in bad][:4]}, ensure_ascii=False))
+            return None
+    # the repaired text passes every hard gate again
+    pwords = set(norm(post).split())
+    pw = norm(post).split()
+    if banned_country(post) or any(b in post for b in BLOCK) or BAIT.search(post.split("المصادر")[0]) or \
+            sum((k in post) if " " in k else (norm(k) in pwords) for k in SPORTS) >= 2 or \
+            any(" ".join(pw[i:i + 7]) in grams for i in range(len(pw) - 6)) or "المصادر" not in post or len(post) > 950:
+        print(json.dumps({"qa_reason": "verified text failed a hard gate"}))
+        return None
+    d["verification"] = v["report"]
     d["post"] = post
     blob = post + " " + (d.get("headline") or "") + " " + (d.get("title") or "")
     d["no_photo"] = sum(w in blob for w in VIOLENT) >= 1
@@ -380,7 +425,14 @@ def pick_reel_cluster(min_sources=2):
         seen = {"stories": []}
     cutoff = time.time() - 3 * 86400
     seen["stories"] = [s for s in seen["stories"] if s["t"] > cutoff]
-    for c in cluster(fetch()):
+    clusters = cluster(fetch())
+    if os.getenv("SIGNALS", "on").lower() != "off":
+        try:   # early-warning ranking only; the >=2-outlet rule below is unchanged
+            signals.apply(clusters, tokens, blocked, lambda t: banned_country(t) or any(b in t for b in BLOCK) or
+                          sum((k in t) if " " in k else (norm(k) in set(norm(t).split())) for k in SPORTS) >= 1)
+        except Exception as ex:
+            print(json.dumps({"signal_error": "apply", "err": str(ex)[:200]}))
+    for c in clusters:
         if len(c["sources"]) < min_sources or blocked(c) or is_seen(seen, c):
             continue
         text = " ".join(i["title"] + " " + i["summary"] for i in c["items"])
@@ -403,21 +455,33 @@ def mark_reeled(seen, c):
 def main():
     a = argparse.ArgumentParser()
     a.add_argument("--max", type=int, default=int(os.getenv("NEWS_PER_RUN", "2")))
-    a.add_argument("--dry", action="store_true", help="print, don't queue")
+    a.add_argument("--dry", action="store_true", help="test run: nothing written to queue/, state/ or media/")
+    a.add_argument("--out", default=os.getenv("KAHWA_DRY_OUT", "/tmp/kahwa-dry"))
     x = a.parse_args()
+    out_dir = Path(x.out)
+    if x.dry:
+        out_dir.mkdir(parents=True, exist_ok=True)
     queued = len(list(QUEUE.glob("*.json"))) if QUEUE.exists() else 0
-    if queued >= int(os.getenv("MAX_QUEUE", "6")):
+    if queued >= int(os.getenv("MAX_QUEUE", "6")) and not x.dry:
         print(json.dumps({"skip": "queue full", "queued": queued}))
         return 0
     seen = load_seen()
     clusters = cluster(fetch())
+    if os.getenv("SIGNALS", "on").lower() != "off":
+        try:
+            signals.apply(clusters, tokens, blocked, lambda t: banned_country(t) or any(b in t for b in BLOCK) or
+                          sum((k in t) if " " in k else (norm(k) in set(norm(t).split())) for k in SPORTS) >= 1)
+        except Exception as ex:      # signals are best-effort: never block the newsroom
+            print(json.dumps({"signal_error": "apply", "err": str(ex)[:200]}))
     made = tried = 0
     for c in clusters:
         if made >= x.max or tried >= int(os.getenv("MAX_TRIES", "5")):
             break
         tier1 = {"BBC عربي", "فرانس 24", "DW عربية", "أخبار الأمم المتحدة"}
         multi = len(c["sources"]) >= int(os.getenv("MIN_SOURCES", "2"))
-        trusted_single = c["sources"][0] in tier1 and c["score"] >= 8   # fresh story from a tier-1 outlet
+        # fresh story from a tier-1 outlet; judged on the feeds-only score so early-warning boosts never let a
+        # single-outlet story through
+        trusted_single = c["sources"][0] in tier1 and c.get("base_score", c["score"]) >= 8
         if not (multi or trusted_single) or blocked(c) or is_seen(seen, c):
             continue
         tried += 1
@@ -431,8 +495,9 @@ def main():
             print(json.dumps({"rejected_by_qa": c["items"][0]["title"][:90]}, ensure_ascii=False))
             continue
         sid = datetime.now(timezone.utc).strftime("%Y%m%d%H%M") + "-" + c["key"]
-        MEDIA.mkdir(exist_ok=True)
-        img = MEDIA / f"{sid}.jpg"
+        img_dir = out_dir if x.dry else MEDIA
+        img_dir.mkdir(exist_ok=True)
+        img = img_dir / f"{sid}.jpg"
         from .cards import render_card
         ct = d.get("card_type") or "photo"
         if d.get("urgent") and ct == "photo":
@@ -447,17 +512,23 @@ def main():
                 "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
                 # give GitHub time to serve the pushed image before any provider fetches it
                 "not_before": datetime.fromtimestamp(time.time() + 900, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")}
+        if d.get("series"):
+            post["series"] = d["series"]
+        post["signals"] = c.get("signals") or {}
+        post["verification"] = {"result": d["verification"]["result"], "rounds": d["verification"]["rounds"]}
         if x.dry:
             print(json.dumps(post, ensure_ascii=False, indent=1))
+            (out_dir / f"{sid}.json").write_text(json.dumps(dict(post, verification=d["verification"]), ensure_ascii=False, indent=1))
         else:
             QUEUE.mkdir(exist_ok=True)
             (QUEUE / f"{sid}.json").write_text(json.dumps(post, ensure_ascii=False, indent=1))
         made += 1
         # reels are no longer rendered here: .github/workflows/reel.yml (HyperFrames v2 renderer) picks the
         # top verified story itself at the reel slots (python -m kahwa_publisher.reels.make).
-    SEEN.parent.mkdir(exist_ok=True)
-    SEEN.write_text(json.dumps(seen, ensure_ascii=False))
-    print(json.dumps({"clusters": len(clusters), "queued_now": made}))
+    if not x.dry:
+        SEEN.parent.mkdir(exist_ok=True)
+        SEEN.write_text(json.dumps(seen, ensure_ascii=False))
+    print(json.dumps({"clusters": len(clusters), ("written_dry" if x.dry else "queued_now"): made}))
     return 0
 
 

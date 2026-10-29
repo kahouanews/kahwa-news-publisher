@@ -96,13 +96,27 @@ def glsl(name):
 
 
 # ------------------------------------------------------------------ music library
+MUSIC_SOURCES = ("library", "synth")
+
+
+def music_source():
+    """Repo variable MUSIC_SOURCE (one-line switch): "library" = our ACE-Step 1.5 tracks in assets/music (default),
+    "synth" = the code-synthesised bed in audio.py (no model, no samples). Anything else -> library."""
+    v = (os.getenv("MUSIC_SOURCE") or "library").strip().lower()
+    return v if v in MUSIC_SOURCES else "library"
+
+
 def pick_music(story, style):
-    """Mood -> track from assets/music/music.json. Tragic/disaster stories always get the calm bed, low."""
-    try:
-        lib = json.loads((MUSIC_DIR / "music.json").read_text())
-        tracks = [t for t in lib["tracks"] if (MUSIC_DIR / t["file"]).exists()]
-    except Exception:
-        tracks = []
+    """Mood -> track from assets/music/music.json. Tragic/disaster stories always get the calm bed, low.
+    Mood rules: tragic -> calm (lowest level), style B (urgent) -> tension, else the story's mood (serious/light/calm)."""
+    src = music_source()
+    tracks = []
+    if src == "library":
+        try:
+            lib = json.loads((MUSIC_DIR / "music.json").read_text())
+            tracks = [t for t in lib["tracks"] if (MUSIC_DIR / t["file"]).exists()]
+        except Exception:
+            tracks = []
     mood = story.get("mood") or "serious"
     if story.get("tragic"):
         mood = "calm"
@@ -112,12 +126,14 @@ def pick_music(story, style):
         mood = "serious"
     level = {"calm": -21.0, "tension": -18.0, "light": -18.0, "serious": -18.5}[mood]
     pool = [t for t in tracks if t["mood"] == mood] or [t for t in tracks if t["mood"] in ("serious", "calm")]
-    if not pool:   # library missing: our own procedural (code-synthesised, non-AI) bed, never a borrowed track
+    if not pool:   # MUSIC_SOURCE=synth or library missing: our own code-synthesised bed, never a borrowed track
         return dict(file=None, procedural={"calm": "photo", "tension": "breaking"}.get(mood, "explainer"),
-                    bpm={"tension": 124, "calm": 70}.get(mood, 96), offset=0.0, lufs=level, mood=mood, title="procedural")
+                    bpm={"tension": 124, "calm": 70}.get(mood, 96), offset=0.0, lufs=level, mood=mood, title="procedural",
+                    source="synth" if src == "synth" else "synth (library missing)")
     h = int(hashlib.sha1(str(story.get("id", "")).encode()).hexdigest(), 16)
     t = pool[h % len(pool)]
-    return dict(file=t["file"], offset=float(t.get("start", 0.0)), lufs=level, mood=mood, title=t.get("id", t["file"]))
+    return dict(file=t["file"], offset=float(t.get("start", 0.0)), lufs=level, mood=mood, title=t.get("id", t["file"]),
+                source="library")
 
 
 # ------------------------------------------------------------------ plans

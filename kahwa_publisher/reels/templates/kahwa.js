@@ -76,7 +76,17 @@
   function blockOut(node, t) {
     tl.to(node, { autoAlpha: 0, filter: "blur(8px)", duration: 0.2, ease: E.exit }, t);
   }
-  function kwWipe(kws, t) { kws.forEach((k, i) => tl.fromTo(k.querySelector(".bg"), { scaleX: 0 }, { scaleX: 1, duration: 0.16, ease: E.camera, immediateRender: true }, t + i * 0.08)); }
+  // keyword highlight wipe. On the hook scene (frame 0 = poster/thumbnail) the highlight must already be complete on
+  // frame 0: a half-drawn or missing red bar on the poster looked like a glitch (fixed 2026-10-29).
+  function kwWipe(kws, t, poster) {
+    kws.forEach((k, i) => {
+      const bg = k.querySelector(".bg");
+      if (poster) { tl.set(bg, { scaleX: 1 }, 0); return; }
+      tl.fromTo(bg, { scaleX: 0 }, { scaleX: 1, duration: 0.16, ease: E.camera, immediateRender: true }, t + i * 0.08);
+    });
+  }
+  // fixed named series (topic lanes): A = «فهم الخبر», B = «العالم في 30 ثانية»
+  function seriesName(style) { return S.series_ar || (style === "B" ? "العالم في 30 ثانية" : "فهم الخبر"); }
 
   function srcTag(parent, text, t, tEnd) {
     const c = el("div", "src", parent, `<b>المصدر: </b><span>${bidi(text)}</span>`);
@@ -273,8 +283,8 @@
       const tb = el("div", "tblock", d);
       const h = el("div", "h1", tb); const r = rich(h, S.headline);
       el("div", "deck", tb, esc(S.deck));
-      kwWipe(r.kws, 0.17);
-      kicker(d, "شرح");
+      kwWipe(r.kws, 0.17, true);
+      kicker(d, seriesName("A"));
       blockOut(tb, SC.hook.d - 0.42);
     }
     // sat: real satellite loop (framed)
@@ -380,7 +390,8 @@
     tl.fromTo(stripes, { x: 0 }, { x: -3200, duration: 1.0, ease: E.camera, stagger: 0.06, immediateRender: false }, 0.05);
     const band = el("div", "bk-band", d);
     const big = el("div", "big", band, `<span class="dot"></span><span>عاجل</span>`);
-    el("div", "meta", band, esc(S.date_ar)).style.left = "300px";
+    const meta = el("div", "meta", band, `<b class="series">${esc(seriesName("B"))}</b><span>${esc(S.date_ar)}</span>`);
+    meta.style.left = "300px";
     const bx = el("div", "abs", band, null, { left: 0, top: 0, width: "268px", height: "150px", background: "var(--ink)" });
     const bb = el("div", "abs", bx, null, { left: "46px", top: "38px", width: "182px", height: "70px" });
     el("img", "", bb, null, { position: "absolute", left: 0, top: 0, width: "100%", height: "100%" }).src = "logo-kahwa.svg";
@@ -392,9 +403,9 @@
     tl.fromTo(shine, { x: 0 }, { x: -1400, duration: 0.7, ease: E.camera, immediateRender: false }, 0.35);
     const tb = el("div", "tblock", d); tb.style.bottom = "auto"; tb.style.top = "560px";
     const h = el("div", "h1", tb, null, { textShadow: "0 4px 30px rgba(0,0,0,0.6)" }); const r = rich(h, S.headline_breaking);
-    const bdeck = el("div", "deck", tb, esc(S.deck_breaking || [S.location.region_ar, S.deck].filter(Boolean).join(" · ")), { color: "#F2F4F7" });
+    const bdeck = el("div", "deck", tb, esc(S.deck_breaking || [(S.location.region_ar && !String(S.deck || "").includes(S.location.region_ar)) ? S.location.region_ar : "", S.deck].filter(Boolean).join(" · ")), { color: "#F2F4F7" });
     tl.to(bdeck, { autoAlpha: 0, filter: "blur(6px)", duration: 0.2, ease: E.exit }, SC.line0.t - 0.45);
-    kwWipe(r.kws, 0.17);
+    kwWipe(r.kws, 0.17, true);
     tl.to(tb, { scale: 0.72, transformOrigin: "100% 0%", duration: 0.5, ease: E.camera }, SC.line0.t - 0.3);
     S.breaking_lines.forEach((ln, i) => {
       const s = SC["line" + i], t = s.t;
@@ -444,7 +455,7 @@
     // hook
     const hk = scene("hook");
     const tt = el("div", "abs", hk, null, { right: "72px", left: "72px", top: "396px", textAlign: "right" });
-    const h = el("div", "h1b", tt); const r = rich(h, S.headline_numbers); kwWipe(r.kws, 0.17);
+    const h = el("div", "h1b", tt); const r = rich(h, S.headline_numbers); kwWipe(r.kws, 0.17, true);
     el("div", "deck", tt, esc(S.date_ar));
     kicker(hk, "خريطة وأرقام");
     blockOut(tt, SC.hook.d - 0.3);

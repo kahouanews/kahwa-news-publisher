@@ -98,7 +98,8 @@ svg.map { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; }
 .bk-band { position: absolute; left: 0; width: 1080px; top: 300px; height: 150px; background: var(--red); overflow: hidden; }
 .bk-band .big { position: absolute; right: 72px; top: 0; height: 150px; display: flex; align-items: center; gap: 22px; font-weight: 800; font-size: 104px; color: #fff; line-height: 1; }
 .bk-band .big .dot { width: 30px; height: 30px; border-radius: 50%; background: #fff; }
-.bk-band .meta { position: absolute; left: 72px; top: 0; height: 150px; display: flex; align-items: center; font-size: 34px; font-weight: 700; color: rgba(255,255,255,0.86); }
+.bk-band .meta { position: absolute; left: 72px; top: 0; height: 150px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 4px; font-size: 28px; font-weight: 700; color: rgba(255,255,255,0.86); line-height: 1.15; }
+.bk-band .meta .series { font-size: 34px; font-weight: 800; color: #fff; white-space: nowrap; }
 .stripe { position: absolute; top: -200px; width: 220px; height: 2400px; background: var(--red); transform: skewX(-14deg); }
 .card { position: absolute; left: 72px; right: 72px; background: rgba(22,27,38,0.94); border-right: 10px solid var(--red); padding: 34px 40px 38px; }
 

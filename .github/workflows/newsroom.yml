@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: "13 5-22/2 * * *"   # every 2h, 06:13-23:13 Algeria time
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Test run: write posts + cards as a workflow artifact only (nothing queued, state/ and media/ untouched)"
+        type: boolean
+        default: true
 permissions:
   contents: write
   issues: write
@@ -13,18 +18,39 @@ jobs:
   write:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -q feedparser "pillow>=10.1"
-      - name: Fetch, verify across outlets, write original posts, render cards
+      - name: Fetch, rank (early-warning signals), verify across outlets, write original posts, verify claims, render cards
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: python -m kahwa_publisher.newsroom
+        run: |
+          if [ "$DRY" = "true" ]; then python -m kahwa_publisher.newsroom --dry --out out | tee out.log
+          else python -m kahwa_publisher.newsroom; fi
+      - name: Dry-run summary
+        if: always() && env.DRY == 'true'
+        run: |
+          echo '### Kahwa newsroom (dry run: nothing queued)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E '"signals"|"verify"|qa_reason|rejected_by_qa|written_dry|signal_error|llm_error' out.log | cut -c1-1500 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always() && env.DRY == 'true'
+        with:
+          name: newsroom-dry-${{ github.run_id }}
+          path: |
+            out/
+            out.log
+          retention-days: 5
+          if-no-files-found: ignore
       - name: Commit queue + cards
+        if: env.DRY != 'true'
         run: |
           git config user.name "kahwa-bot"
           git config user.email "kahwa-bot@users.noreply.github.com"
@@ -32,5 +58,6 @@ jobs:
           git diff --cached --quiet || git commit -m "newsroom $(date -u +%FT%TZ)"
           for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
       - name: Clean old cards (keep 7 days)
+        if: env.DRY != 'true'
         run: |
           find media \( -name '*.jpg' -o -name '*.mp4' \) -mtime +7 -delete 2>/dev/null || true

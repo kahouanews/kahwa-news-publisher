@@ -1,7 +1,0 @@
-[
-  "tests/test_dispatcher.py::test_auth_alert_and_failover",
-  "tests/test_dispatcher.py::test_classify",
-  "tests/test_dispatcher.py::test_failover_to_second",
-  "tests/test_dispatcher.py::test_fb_block_pauses_all_and_stops",
-  "tests/test_dispatcher.py::test_uncertain_no_failover"
-]

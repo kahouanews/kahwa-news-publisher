@@ -1,0 +1,43 @@
+name: llm-fallback-bench (one-off, manual)
+# Measures whether an open Arabic model can be the newsroom's fallback writer when the Gemini free tier fails:
+# llama.cpp (prebuilt release, CPU) + Jais 3 GGUF (Apache-2.0 per model card). Writes the real newsroom prompt for a
+# current verified story and reports latency, tokens/s, JSON validity and the text. Publishes nothing, queues nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "space-separated repo:file"
+        default: "IFM/Jais-3-3.7B-GGUF:Jais-3-3.7B-Q4_K_M.gguf IFM/Jais-3-0.9B-GGUF:Jais-3-0.9B-Q8_0.gguf"
+      llama_tag: { description: "llama.cpp release tag", default: "b11972" }
+permissions:
+  contents: read
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: llama.cpp ${{ inputs.llama_tag }} (prebuilt CPU x64)
+        run: |
+          curl -sL -o llama.tgz "https://github.com/ggml-org/llama.cpp/releases/download/${{ inputs.llama_tag }}/llama-${{ inputs.llama_tag }}-bin-ubuntu-x64.tar.gz"
+          mkdir llama && tar -xzf llama.tgz -C llama --strip-components=1 || tar -xzf llama.tgz -C llama
+          find llama -name 'llama-server' -type f | head -1 > server_path.txt
+          cat server_path.txt; "$(cat server_path.txt)" --version || true
+          nproc; free -g
+      - name: Weights
+        run: |
+          pip install -q -U "huggingface_hub[hf_xet]" feedparser
+          for m in ${{ inputs.models }}; do hf download "${m%%:*}" "${m##*:}" --local-dir models; done
+          ls -la models
+      - name: Bench
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python tools/llm/bench.py --server "$(cat server_path.txt)" --models "${{ inputs.models }}" --out bench
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: llm-bench-${{ github.run_id }}
+          path: bench/
+          retention-days: 7

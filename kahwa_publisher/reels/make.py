@@ -25,6 +25,10 @@ from .story import write_story
 
 REPO = os.getenv("GITHUB_REPOSITORY", "kahouanews/kahwa-news-publisher")
 MEDIA_BRANCH = os.getenv("REELS_MEDIA_BRANCH", "reels-media")
+# reels-media is served by GitHub Pages (Content-Type video/mp4, direct 200, no redirect) - see tools/host_reel.sh
+MEDIA_BASE = os.getenv("REELS_MEDIA_BASE", "https://{owner}.github.io/{repo}/").format(owner=REPO.split("/")[0], repo=REPO.split("/")[1])
+# fixed named series (topic lanes): style A explainer = «فهم الخبر», style B urgent = «العالم في 30 ثانية»
+SERIES = {"A": "فهم الخبر", "B": "العالم في 30 ثانية"}
 SCIENCE = re.compile(r"space|nasa|satellite|planet|moon|mars|rocket launch|asteroid|comet|telescope|hurricane|typhoon|cyclone|"
                      r"storm|volcano|earth|climate|glacier|ice|ocean|wildfire|flood", re.I)
 
@@ -37,14 +41,33 @@ def plain(s):
     return (s or "").replace("[[", "").replace("]]", "")
 
 
-def post_text(S):
-    lines = [plain(S["headline"]), plain(S["deck"]), ""]
+def subject_line(S):
+    return re.sub(r"\s+", " ", plain(S.get("headline") or "")).strip(" .،|")
+
+
+def post_text(S, style="A"):
+    """Caption. Line 1 is always '<series> | <subject>' so the topic lane and the subject are clear from the first line."""
+    lines = [f"{SERIES.get(style, SERIES['A'])} | {subject_line(S)}", plain(S["deck"]), ""]
     lines += [f"- {plain(f['text'])}" for f in S["facts"]]
     lines += ["", "المصادر: " + "، ".join(S["sources"][:4])]
     if S.get("media"):
         names = list(dict.fromkeys(m["credit_short"] for m in S["media"].values()))[:4]
         lines.append("صور ولقطات أرشيفية: " + "، ".join(names))
     return "\n".join(lines).strip()
+
+
+def reel_text_lines(S, style):
+    """Every on-screen sentence of the reel (same lines story.fact_check reads)."""
+    out = [S.get("headline"), S.get("deck"), S.get("visual_caption"), S.get("where_line"),
+           (S.get("lower_third") or {}).get("role_ar")]
+    out += [f.get("text") for f in S.get("facts") or []] + list((S.get("next") or {}).get("lines") or [])
+    if style == "B":
+        out += [S.get("headline_breaking"), S.get("deck_breaking")] + [b.get("text") for b in S.get("breaking_lines") or []]
+        out += list(S.get("ticker") or [])
+    bn = S.get("big_number") or {}
+    if bn:
+        out.append(" ".join(str(bn.get(k, "")) for k in ("prefix_ar", "display", "label_ar", "sub_ar")).strip())
+    return [plain(x).strip() for x in out if isinstance(x, str) and x.strip()]
 
 
 def main():
@@ -93,17 +116,31 @@ def main():
             summary["media_rejected_n"] = len(rejected)
             summary["t_media_s"] = round(time.time() - t0, 1)
         style = a.style or ("B" if S.get("urgent") else "A")
+        S["series_ar"] = SERIES[style]
         gate(S)
+        # second verification layer on everything the viewer will read (on-screen lines + caption), fail closed
+        if S.get("source_texts"):
+            from ..newsroom import llm as _llm
+            from ..verify import check as vcheck
+            srcs = [p.strip() for p in re.split(r"\n(?=- \[)", S["source_texts"]) if p.strip()]
+            screen = reel_text_lines(S, style) + post_text(S, style).split("\n")
+            txt = "\n".join(dict.fromkeys(l for l in screen if l and not l.startswith(("المصادر", "صور ولقطات"))))
+            claims, bad = vcheck(_llm, txt, srcs)
+            summary["verification"] = {"claims": len(claims), "unsupported": [{"claim": b["claim"], "verdict": b["verdict"],
+                                                                                 "note": b["note"]} for b in bad]}
+            if bad:
+                raise RuntimeError(f"claim verification failed, reel NOT made: {summary['verification']['unsupported'][:3]}")
         (out / "story.json").write_text(json.dumps(S, ensure_ascii=False, indent=1))
         mp4 = out / f"{S['id']}-reel.mp4"
         res = render_story(S, style, mp4, build=build, media_root=media_root, workers=a.workers)
-        summary.update(style=style, qa=res, t_total_s=round(time.time() - t0, 1))
+        summary.update(style=style, series=S["series_ar"], caption_first_line=post_text(S, style).split("\n")[0], qa=res,
+                       t_total_s=round(time.time() - t0, 1))
         if res["problems"]:
             raise RuntimeError(f"QA failed, reel NOT queued: {res['problems']}")
         if not dry and c is not None:
-            url = f"https://raw.githubusercontent.com/{REPO}/{MEDIA_BRANCH}/{mp4.name}"
+            url = MEDIA_BASE + mp4.name
             now = datetime.now(timezone.utc)
-            item = {"id": S["id"] + "-reel", "kind": "reel", "text": post_text(S), "title": plain(S["headline"])[:90],
+            item = {"id": S["id"] + "-reel", "kind": "reel", "text": post_text(S, style), "title": plain(S["headline"])[:90],
                     "media": [{"type": "video", "url": url}], "priority": 4 if style == "B" else 6, "sources": S["sources"],
                     "created": now.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
                     "not_before": (now + timedelta(minutes=45)).strftime("%Y-%m-%dT%H:%M:%S+00:00"), "style": style}

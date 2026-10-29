@@ -92,6 +92,31 @@ class Zernio(Provider):
     def _h(self):
         return {"Authorization": f"Bearer {self.key}"}
 
+    def stage_video(self, url, timeout=180):
+        """Re-host a reel MP4 on Zernio's own storage (docs.zernio.com/guides/media-uploads): POST /v1/media/presign
+        with contentType video/mp4, PUT the bytes, use publicUrl. Zernio then fetches from its own R2 bucket, so a host
+        that serves the wrong Content-Type can never break a reel. Returns the publicUrl, or None (caller keeps `url`)."""
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "kahwa-news-publisher/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data = r.read()
+            if len(data) < 100_000 or data[4:8] != b"ftyp":
+                raise ValueError(f"not an MP4 ({len(data)} bytes)")
+            name = url.rsplit("/", 1)[-1].split("?")[0] or "reel.mp4"
+            code, raw = http_json("POST", f"{self.base}/media/presign", self._h(),
+                                  {"filename": name, "contentType": "video/mp4", "size": len(data)}, timeout=60)
+            if code != 200:
+                raise RuntimeError(f"presign HTTP {code}: {raw[:200]}")
+            pre = json.loads(raw)
+            put = urllib.request.Request(pre["uploadUrl"], data=data, method="PUT", headers={"Content-Type": "video/mp4"})
+            with urllib.request.urlopen(put, timeout=timeout) as r:
+                if r.status not in (200, 201):
+                    raise RuntimeError(f"PUT HTTP {r.status}")
+            return pre["publicUrl"]
+        except Exception as e:
+            print(json.dumps({"msg": "zernio stage_video failed, using the original URL", "url": url, "err": str(e)[:200]}))
+            return None
+
     def _payload(self, post):
         entry = {"platform": "facebook", "accountId": self.account}
         psd = {}
@@ -105,7 +130,13 @@ class Zernio(Provider):
             entry["platformSpecificData"] = psd
         body = {"content": post["text"], "platforms": [entry], "publishNow": True}
         if post.get("media"):
-            body["mediaItems"] = [{"type": m["type"], "url": m["url"]} for m in post["media"]]
+            items = []
+            for m in post["media"]:
+                url = m["url"]
+                if m["type"] == "video" and os.getenv("ZERNIO_STAGE_VIDEO", "true").lower() == "true":
+                    url = self.stage_video(url) or url
+                items.append({"type": m["type"], "url": url})
+            body["mediaItems"] = items
         return body
 
     def _from_post(self, code, raw):

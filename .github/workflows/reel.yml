@@ -12,6 +12,10 @@ on:
         description: "Render + QA only (no queue, no media push)"
         type: boolean
         default: true
+      host_test:
+        description: "Dry run only: also host the MP4 on GitHub Pages as test-<file> (checks video/mp4) and probe Zernio media storage (no post is created)"
+        type: boolean
+        default: false
 permissions:
   contents: write
   issues: write
@@ -63,6 +67,8 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           PUBLISHING_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && 'false' || vars.PUBLISHING_ENABLED }}
+          # one-line switch (repo variable): "library" = assets/music ACE-Step tracks, "synth" = code-synthesised bed
+          MUSIC_SOURCE: ${{ vars.MUSIC_SOURCE || 'library' }}
         run: |
           start=$(date +%s)
           python -m kahwa_publisher.reels.make --out out
@@ -84,25 +90,38 @@ jobs:
             out/error.txt
           retention-days: 5
           if-no-files-found: ignore
-      - name: Upload MP4 to the reels-media branch (only when a queue item was produced)
+      - name: Host the MP4 on GitHub Pages (only when a queue item was produced)
         if: success() && hashFiles('out/queue-item.json') != ''
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           set -e
           F=$(ls out/*-reel.mp4 | head -1)
-          mkdir rmb && cd rmb && git init -q
-          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          if git fetch -q --depth=1 origin reels-media; then git checkout -q FETCH_HEAD; fi
-          cut=$(date -u -d '5 days ago' +%Y%m%d)
-          for f in *.mp4; do [ -e "$f" ] || continue; [ "${f:0:8}" -lt "$cut" ] && rm -f "$f"; done
-          cp "../$F" .
-          git checkout -q --orphan new
-          git add -A
-          git -c user.name=kahwa-bot -c user.email=kahwa-bot@users.noreply.github.com commit -qm "reels media $(date -u +%FT%TZ)"
-          git push -qf origin new:reels-media
-          URL=$(python -c "import json;print(json.load(open('../out/queue-item.json'))['media'][0]['url'])")
-          for i in $(seq 1 12); do curl -sfI "$URL" >/dev/null && echo "served: $URL" && exit 0; sleep 10; done
-          echo "MP4 not served at $URL"; exit 1
+          URL=$(bash tools/host_reel.sh "$F")
+          WANT=$(python -c "import json;print(json.load(open('out/queue-item.json'))['media'][0]['url'])")
+          [ "$URL" = "$WANT" ] || { echo "hosted URL $URL != queue URL $WANT"; exit 1; }
+      - name: Hosting test (dry run only, nothing is queued or posted)
+        if: success() && github.event_name == 'workflow_dispatch' && inputs.dry_run && inputs.host_test && hashFiles('out/*-reel.mp4') != ''
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          ZERNIO_API_KEY: ${{ secrets.ZERNIO_API_KEY }}
+        run: |
+          set -e
+          F=$(ls out/*-reel.mp4 | head -1)
+          cp "$F" "out/test-$(basename "$F")"
+          URL=$(bash tools/host_reel.sh "out/test-$(basename "$F")")
+          curl -sI "$URL" | grep -iE '^(HTTP|content-type|content-length)' | tee -a "$GITHUB_STEP_SUMMARY"
+          python - "$URL" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import sys, urllib.request
+          from kahwa_publisher.providers import Zernio
+          z = Zernio()
+          if not z.key:
+              print("zernio probe: no ZERNIO_API_KEY, skipped"); sys.exit(0)
+          pub = z.stage_video(sys.argv[1])
+          if not pub:
+              sys.exit("zernio probe: staging failed")
+          r = urllib.request.urlopen(urllib.request.Request(pub, method="HEAD"), timeout=60)
+          print(f"zernio probe: staged on Zernio storage, HTTP {r.status}, {r.headers.get('Content-Type')}, {r.headers.get('Content-Length')} bytes (temp storage, auto-deleted after 7 days; no post created)")
+          PY
       - name: Queue the reel for the dispatcher
         if: success() && hashFiles('out/queue-item.json') != ''
         run: |
