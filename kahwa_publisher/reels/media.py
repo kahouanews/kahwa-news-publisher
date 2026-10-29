@@ -29,6 +29,8 @@ VIOLENT_RE = re.compile(r"\b(war|wars|battle|attack|attacks|bomb\w*|explosion|bl
                         r"bodies|blood|bloody|injur\w*|wounded|casualt\w*|weapon\w*|gun\w*|rifle|soldier\w*|militar\w*|army|troops|tank|"
                         r"riot\w*|massacre|execution|terror\w*|killing|killed|victim\w*|funeral|grave|morgue|refugee camp|protest\w*|police)\b", re.I)
 MISLEAD_RE = re.compile(r"\b(wreck\w*|crash\w*|derail\w*|accident\w*|collision\w*|debris|rubble|disaster)\b", re.I)
+GRAPHIC_RE = re.compile(r"\b(map|maps|mapa|karte|carte|diagram|chart|graph|infographic|logo|flag|bandera|coat of arms|escudo|emblem|"
+                        r"scheme|schematic|plan|layout|route|network|screenshot|poster|banner|icon|svg|drawing|illustration|render|3d)\b", re.I)
 PEOPLE_RE = re.compile(r"\b(portrait|selfie|headshot|mugshot)\b", re.I)
 
 
@@ -106,6 +108,14 @@ def acceptable(c, story_date=None):
         return False, "portrait"
     if MISLEAD_RE.search(text):
         return False, "other-event damage imagery (misleading)"
+    if GRAPHIC_RE.search(c.get("title", "") + " " + c.get("cats", "")):
+        return False, "map/diagram/graphic (may show other countries; our map is drawn by us)"
+    sat = re.search(r"satellite|modis|viirs|goes|himawari|landsat|sentinel|terra|aqua|iss0", text, re.I)
+    if c.get("mime") == "image/png" and not sat:
+        return False, "png (usually a diagram/screenshot)"
+    places = c.get("places") or []
+    if places and not any(p.lower() in text.lower() for p in places):
+        return False, "does not mention the story's place"
     q = [w for w in re.findall(r"[a-z]{4,}", (c.get("q") or "").lower()) if w not in ("image", "photo", "view", "with", "from")]
     if q and not any(w in text.lower() for w in q):
         return False, "not relevant to query"
@@ -195,19 +205,19 @@ def download(c, dest_dir, idx):
     return name
 
 
-def gather(queries, dest_dir, want=10, story_date=None, use_nasa=False, log=print):
+def gather(queries, dest_dir, want=10, story_date=None, use_nasa=False, log=print, places=None):
     """Search, filter, download up to `want` distinct items. Returns (media dict, rejected list)."""
     seen, media, rejected = set(), {}, []
     cands = []
     for q in [q for q in queries if q][:6]:
         try:
-            cands += [dict(x, q=q) for x in commons_search(q)]
+            cands += [dict(x, q=q, places=places or []) for x in commons_search(q)]
         except Exception as ex:
             log(json.dumps({"media_search_error": q, "err": str(ex)[:120]}))
         time.sleep(0.5)
         if use_nasa:
             try:
-                cands += [dict(x, q=q) for x in nasa_search(q)]
+                cands += [dict(x, q=q, places=places or []) for x in nasa_search(q)]
             except Exception as ex:
                 log(json.dumps({"nasa_search_error": q, "err": str(ex)[:120]}))
     # variety: round-robin across queries (videos first inside each query), max 2 items per author, no near-duplicates

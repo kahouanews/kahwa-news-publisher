@@ -85,7 +85,8 @@ def main():
             media_root = build / "media"
             qs = S.get("footage_queries") or []
             got, rejected = M.gather(qs, media_root, want=10 if style0 == "A" else 5, story_date=datetime.now(timezone.utc),
-                                     use_nasa=bool(SCIENCE.search(" ".join(qs))), log=log)
+                                     use_nasa=bool(SCIENCE.search(" ".join(qs))), log=log,
+                                     places=S.get("place_terms_en"))
             S["media"], S["media_rejected"] = got, rejected[:40]
             summary["media"] = {k: {"page": v["page"], "license": v["license"], "author": v["author"], "archive": v["archive"]}
                                 for k, v in got.items()}

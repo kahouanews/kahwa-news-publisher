@@ -10,8 +10,11 @@ from pathlib import Path
 ap = argparse.ArgumentParser()
 ap.add_argument("--ace", default="ace"); ap.add_argument("--shard", type=int, default=0)
 ap.add_argument("--of", type=int, default=1); ap.add_argument("--out", default="out")
+ap.add_argument("--dit", default="")
 a = ap.parse_args()
 cfg = json.loads((Path(__file__).parent / "prompts.json").read_text())
+if a.dit:
+    cfg["model"]["synth_model"] = a.dit
 ace = Path(a.ace).resolve(); out = Path(a.out).resolve(); out.mkdir(parents=True, exist_ok=True)
 models = str(ace / "models"); b = ace / "build"
 tracks = [t for i, t in enumerate(cfg["tracks"]) if i % a.of == a.shard]

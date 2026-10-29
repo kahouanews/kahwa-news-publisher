@@ -22,7 +22,7 @@ PROMPT = """أنت محرر فيديو في غرفة أخبار عالمية ا�
 اعتماداً فقط على الوقائع الواردة في المصادر أدناه.
 قواعد صارمة:
 - كل رقم تكتبه يجب أن يكون موجوداً حرفياً في المصادر بنفس الأرقام (لا تحسب ولا تقرّب ولا تحوّل الوحدات ولا تكتب أرقاماً غير موجودة). إن لم توجد أرقام كافية فاكتب الوقائع بلا أرقام.
-- لا تخترع أي اسم أو مكان أو تصريح. حياد تام، بلا رأي ولا تهويل ولا صفات انفعالية، بلا إيموجي، بلا روابط.
+- لا تخترع أي اسم أو مكان أو تصريح، ولا تضف أسباباً أو تفسيرات أو اتهامات (مثل الإهمال أو التقصير) غير مذكورة حرفياً في المصادر. حياد تام، بلا رأي ولا تهويل ولا صفات انفعالية، بلا إيموجي، بلا روابط.
 - ممنوع منعاً باتاً ذكر المغرب أو الإمارات أو الجزائر أو إسرائيل بأي شكل، وممنوع الرياضة، وممنوع طلب التفاعل (شارك، علّق، تابع...).
 - ضع الكلمة أو العبارة الأهم (كلمة إلى ثلاث كلمات) بين [[ ]] مرة واحدة على الأكثر في كل سطر.
 - الأطوال: العنوان حتى 45 حرفاً، كل نقطة حتى 60 حرفاً، كل سطر عاجل حتى 55 حرفاً.
@@ -47,6 +47,7 @@ PROMPT = """أنت محرر فيديو في غرفة أخبار عالمية ا�
  "ticker": ["جملة قصيرة 1", "جملة 2", "جملة 3"],
  "mood": "serious|calm|light", "tragic": true, "urgent": false,
  "footage_queries": ["...", "..."],
+ "place_terms_en": ["أسماء المكان بالإنجليزية وبلغة البلد كما تظهر في عناوين صور ويكيميديا، مثل: Spain, Spanish, España, Toledo"],
  "safe": true}
 اجعل "safe" = false إذا كان الخبر رياضياً أو يذكر الدول الممنوعة أو عن الدين أو يتطلب صوراً عنيفة أو لا يمكن التحقق منه.
 إذا لم يوجد في المصادر رقم واضح للعداد فاجعل counter.display فارغاً "".
@@ -210,6 +211,7 @@ def build_story(d, items, src_text, sid, outlets):
         "mood": d.get("mood") if d.get("mood") in ("serious", "calm", "light") else "serious",
         "tragic": bool(d.get("tragic")), "urgent": bool(d.get("urgent")),
         "footage_queries": [str(q)[:60] for q in (d.get("footage_queries") or [])[:5]],
+        "place_terms_en": [str(q)[:30] for q in (d.get("place_terms_en") or [])[:8] if len(str(q)) >= 3] or [str(loc.get("country_en", ""))],
         "media": {},
     }
     if disp:
@@ -230,10 +232,26 @@ def build_story(d, items, src_text, sid, outlets):
         S["tragic"] = True
     if S["tragic"] and S["mood"] == "light":
         S["mood"] = "calm"
-    hits = banned_hits(vis + " " + " ".join(S["footage_queries"]))
+    hits = banned_hits(vis + " " + " ".join(S["footage_queries"] + S["place_terms_en"]))
     if hits:
         raise StoryError(f"banned: {hits}")
     return S
+
+
+CHECK = """أنت مدقق حقائق صارم في وكالة أنباء دولية. أمامك نصوص ريل إخباري قصير والمصادر.
+قارن كل سطر بالمصادر: هل يحتوي معلومة أو سبباً أو اتهاماً أو اسماً أو رقماً غير موجود في المصادر؟ هل يغيّر المعنى أو يبالغ؟
+أعد JSON فقط: {"ok": true/false, "problems": ["السطر: المشكلة"]}"""
+
+
+def fact_check(llm, S, src):
+    lines = [S["headline"], S["headline_breaking"], S["deck"], S["visual_caption"], S["where_line"], S["lower_third"]["role_ar"]]
+    lines += [f["text"] for f in S["facts"]] + S["next"]["lines"] + [b["text"] for b in S["breaking_lines"]] + S["ticker"]
+    bn = S.get("big_number") or {}
+    lines.append(" ".join(str(bn.get(k, "")) for k in ("prefix_ar", "display", "label_ar", "sub_ar")))
+    txt = "\n".join("- " + l.replace("[[", "").replace("]]", "") for l in lines if l)
+    raw = llm(CHECK + "\n\nالمصادر:\n" + src[:9000] + "\n\nنصوص الريل:\n" + txt)
+    d = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
+    return bool(d.get("ok")), [str(p)[:160] for p in (d.get("problems") or [])][:6]
 
 
 def write_story(llm, items, outlets, sid, fetch_articles=True, log=print):
@@ -247,6 +265,9 @@ def write_story(llm, items, outlets, sid, fetch_articles=True, log=print):
         try:
             d = json.loads(raw)
             S = build_story(d, items, src, sid, outlets)
+            ok, problems = fact_check(llm, S, src)
+            if not ok:
+                raise StoryError("fact-check: " + " | ".join(problems))
             S["source_texts"] = src[:12000]
             S["source_urls"] = [it.get("link") for it in items if it.get("link")][:6]
             return S, src

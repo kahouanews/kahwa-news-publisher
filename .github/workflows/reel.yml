@@ -26,6 +26,7 @@ jobs:
       DO_NOT_TRACK: "1"
       HYPERFRAMES_TELEMETRY: "0"
       KAHWA_BUILD: /tmp/kahwa-reel
+      HF_WORKERS: "3"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

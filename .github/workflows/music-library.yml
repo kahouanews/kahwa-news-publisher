@@ -5,7 +5,9 @@ name: music-library (one-off, manual)
 on:
   workflow_dispatch:
     inputs:
-      shards: { description: "number of parallel shards", default: "6" }
+      shards_json: { description: "matrix of shard indexes (JSON list)", default: "[0,1,2,3,4,5]" }
+      of: { description: "total number of shards", default: "6" }
+      dit: { description: "DiT GGUF file", default: "acestep-v15-xl-turbo-Q8_0.gguf" }
 permissions:
   contents: read
 jobs:
@@ -14,7 +16,8 @@ jobs:
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      matrix: { shard: [0, 1, 2, 3, 4, 5] }
+      matrix:
+        shard: ${{ fromJSON(inputs.shards_json) }}
     steps:
       - uses: actions/checkout@v4
         with: { sparse-checkout: tools/music }
@@ -30,10 +33,10 @@ jobs:
         run: |
           pip install -q -U "huggingface_hub[hf_xet]"
           hf download Serveurperso/ACE-Step-1.5-GGUF vae-BF16.gguf Qwen3-Embedding-0.6B-Q8_0.gguf \
-            acestep-5Hz-lm-1.7B-Q8_0.gguf acestep-v15-xl-turbo-Q8_0.gguf --local-dir ace/models
+            acestep-5Hz-lm-1.7B-Q8_0.gguf ${{ inputs.dit }} --local-dir ace/models
           ls -la ace/models
       - name: Generate
-        run: python tools/music/gen.py --ace ace --shard ${{ matrix.shard }} --of 6 --out out
+        run: python tools/music/gen.py --ace ace --shard ${{ matrix.shard }} --of ${{ inputs.of }} --dit ${{ inputs.dit }} --out out
       - uses: actions/upload-artifact@v4
         if: always()
         with:
