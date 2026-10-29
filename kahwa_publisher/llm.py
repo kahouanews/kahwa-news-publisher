@@ -220,7 +220,8 @@ class Gemini:
 
     def __init__(self):
         self.key = os.getenv("GEMINI_API_KEY", "")
-        self.no_json = set()
+        self.no_json, self.no_think = set(), set()
+        self.gemma_thinking = os.getenv("LLM_GEMMA_THINKING", "minimal")   # Gemma 4 thinks by default: 100+ s per call
 
     def configured(self):
         return bool(self.key)
@@ -231,8 +232,14 @@ class Gemini:
             gen["maxOutputTokens"] = max_out
         if not model.startswith("gemma") and model not in self.no_json:
             gen["responseMimeType"] = "application/json"   # Gemma on the Gemini API has no JSON mode
+        if model.startswith("gemma") and self.gemma_thinking and model not in self.no_think:
+            gen["thinkingConfig"] = {"thinkingLevel": self.gemma_thinking}
         body = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": gen}
-        code, raw, hdr = _http(f"{self.base}/models/{model}:generateContent", body, {"x-goog-api-key": self.key}, timeout)
+        code, raw, hdr = _http(f"{self.base}/models/{model}:generateContent", body, {"x-goog-api-key": self.key},
+                               max(timeout, 180) if model.startswith("gemma") else timeout)
+        if code == 400 and "thinkingConfig" in gen and re.search(r"think", raw, re.I):
+            self.no_think.add(model)                       # thinking control not supported: plain call
+            return self.call(model, prompt, temperature, max_out, timeout)
         if code == 400 and "responseMimeType" in gen and re.search(r"json mode|response_mime_type|responseMimeType", raw, re.I):
             self.no_json.add(model)
             return self.call(model, prompt, temperature, max_out, timeout)

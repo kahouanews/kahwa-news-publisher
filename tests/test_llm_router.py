@@ -222,3 +222,20 @@ def test_pacing_shrinks_output_budget_then_waits(tmp_path):
     assert r._pace(key, 100, 1000) == 700 and not waits          # 1000 - 300 left in the minute
     r.window[key] = [(_t.time(), 900, 600)]
     assert r._pace(key, 100, 1000) == 1000 and waits             # <500 left: waited for the window
+
+
+def test_gemma_thinking_fallback(monkeypatch):
+    calls = []
+
+    def fake_http(url, body, headers, timeout):
+        calls.append(body["generationConfig"].copy())
+        if "thinkingConfig" in body["generationConfig"]:
+            return 400, '{"error":{"message":"Thinking level is not supported for this model."}}', {}
+        return 200, json.dumps({"candidates": [{"content": {"parts": [{"text": "x", "thought": True}, {"text": '{"ok": true}'}]}}],
+                                "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 2}}), {}
+    monkeypatch.setattr(R, "_http", fake_http)
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    g = R.Gemini()
+    text, _u = g.call("gemma-4-31b-it", "p", 0.0)
+    assert text == '{"ok": true}' and "thinkingConfig" in calls[0] and "thinkingConfig" not in calls[1]
+    assert "responseMimeType" not in calls[0]                     # no JSON mode on Gemma
