@@ -7,6 +7,9 @@
                Any figure in a claim must also appear in the sources (code check).
 3. repair    : unsupported / contradicted claims are dropped or rewritten from supported facts only, then the WHOLE
                text is decomposed + verified again (one repair round).
+Attribution (2026-10-29): every in-text attribution ("قالت وزارة …", "وفق وكالة …") must itself be backed by the source
+text (code check, attribution.unsupported_attributions); a competing outlet named anywhere counts as unsupported; with
+require_attribution, numbers / casualty counts / accusations without any in-text attribution are flagged for repair.
 Fail closed: any LLM / parse error, an empty claim list, or a claim still unsupported after the repair -> None
 (the caller skips the story; nothing is queued).
 
@@ -15,9 +18,12 @@ verify_text(llm, text, sources, kind) -> {"text": final_text, "report": {...}} o
 import json
 import re
 
+from . import attribution as A
+
 DECOMPOSE = """أنت محلل تحقق في وكالة أنباء. فكّك النص التالي إلى ادعاءات واقعية ذرية: كل ادعاء جملة عربية قصيرة مستقلة فيها واقعة واحدة قابلة للتحقق (من/ماذا/أين/متى/كم/من قال ماذا).
 - غطِّ كل معلومة في النص: الأرقام، الأسماء، الأماكن، التواريخ، الصفات، التصريحات المنسوبة، النتائج والأسباب.
-- لا تُدرج: سطر "المصادر:"، أسماء المؤسسات الإعلامية، الوسوم (#)، اسم السلسلة قبل "|"، أسطر حقوق الصور.
+- إذا نُسبت واقعة إلى جهة ("وفق ..."، "قالت ..."، "أعلنت ...") فاجعل الجهة جزءاً من الادعاء نفسه (مثال: "وزارة الصحة قالت إن 12 شخصاً توفوا").
+- لا تُدرج: سطر "المصدر:" أو "المصادر:"، الوسوم (#)، اسم السلسلة قبل "|"، أسطر حقوق الصور.
 - check_worthy = true إذا كان الادعاء رقماً أو اسماً أو تصريحاً أو واقعة يمكن أن تكون خاطئة؛ false فقط للعبارات العامة جداً.
 أعد JSON فقط: {"claims": [{"id": 1, "claim": "...", "span": "الجزء من النص الذي جاء منه الادعاء حرفياً", "check_worthy": true}]}
 
@@ -28,13 +34,16 @@ VERIFY = """أنت مدقق حقائق صارم. لديك مصادر مرقمة 
 - supported: المصادر تقول ذلك صراحة (يُقبل اختلاف الصياغة لا اختلاف المعنى). يجب أن تنسخ في evidence عبارة من المصدر المذكور حرفياً كما هي (4 إلى 25 كلمة).
 - contradicted: المصادر تقول عكس ذلك أو رقماً/اسماً مختلفاً.
 - unsupported: غير موجود في المصادر، أو مبالغ فيه، أو أكثر تحديداً مما تقوله المصادر، أو استنتاج غير مذكور.
+- النسبة جزء من الادعاء: إذا قال الادعاء إن جهة ما (وزارة، شرطة، وكالة أنباء...) قالت شيئاً، فهو supported فقط إذا كانت المصادر تنسبه إلى الجهة نفسها.
 أعد JSON فقط: {"results": [{"id": 1, "verdict": "supported|contradicted|unsupported", "source": رقم المصدر, "evidence": "اقتباس حرفي من ذلك المصدر", "note": "سبب قصير"}]}
 """
 
 REPAIR = """أنت محرر أول. النص التالي يحتوي ادعاءات غير مدعومة بالمصادر (قائمة أدناه). أعد كتابة النص بحيث:
 - تحذف كل ادعاء غير مدعوم أو تعيد صياغته ليطابق ما في المصادر حرفياً من حيث الوقائع فقط.
 - لا تضف أي معلومة جديدة غير موجودة في المصادر.
-- تحافظ على نفس البنية والأسطر (السطر الأول، التفاصيل، الوسوم، سطر "المصادر:"، أي سطر يبدأ بـ "صورة" يبقى كما هو) وعلى نفس الأسلوب، بلا إيموجي وبلا روابط.
+- تحافظ على نفس البنية والأسطر (السطر الأول، التفاصيل، الوسوم، أي سطر يبدأ بـ "المصدر" أو "صورة" يبقى كما هو) وعلى نفس الأسلوب، بلا إيموجي وبلا روابط.
+- النسبة: انسب الأرقام والحصائل والاتهامات إلى الجهة الأصلية التي تذكرها المصادر (وزارة، شرطة، وكالة أنباء...) بصيغة "وفق ..." أو "قالت ..."؛
+  إن لم تذكر المصادر الجهة فاكتب "بحسب تقارير". لا تنسب شيئاً لجهة لا تذكرها المصادر، ولا تذكر أبداً أي قناة أو موقع إخباري أو صحيفة.
 أعد JSON فقط: {"text": "النص المصحح كاملاً"}
 """
 
@@ -90,14 +99,16 @@ def _strip_for_claims(text):
         s = ln.strip()
         if "|" in s and s.split("|", 1)[0].strip() in SERIES_PREFIXES:
             s = ln = s.split("|", 1)[1].strip()
-        if not s or s.startswith(("المصادر", "صورة أرشيفية", "صور ولقطات أرشيفية", "صورة:")) or re.fullmatch(r"(#\S+\s*)+", s):
+        if not s or s.startswith(("المصادر", "المصدر:", "المصدر :", "إعداد:", "صورة أرشيفية", "صور ولقطات أرشيفية", "صورة:", "خريطة:")) or \
+                re.fullmatch(r"(#\S+\s*)+", s):
             continue
         keep.append(ln)
     return "\n".join(keep)
 
 
-def check(llm, text, sources):
-    """One decomposition + verification pass. Returns (claims_with_verdicts, bad_list)."""
+def check(llm, text, sources, require_attribution=False):
+    """One decomposition + verification pass. Returns (claims_with_verdicts, bad_list).
+    Attribution checks run in code on top of the LLM verdicts (an invented or outlet attribution is a bad claim)."""
     body = _strip_for_claims(text)
     claims = _json(llm(DECOMPOSE + body, temperature=0.0)).get("claims") or []
     claims = [c for c in claims if isinstance(c, dict) and (c.get("claim") or "").strip()]
@@ -128,14 +139,21 @@ def check(llm, text, sources):
         c.update(verdict=v, source=r.get("source"), evidence=(r.get("evidence") or "")[:200], note=(r.get("note") or "")[:160])
         if v != "supported":
             bad.append(c)
+    for ent, why in A.unsupported_attributions(body, all_src):
+        bad.append({"claim": f"النسبة إلى «{ent}»", "verdict": "unsupported", "note": why, "check_worthy": True})
+    for h in A.outlet_hits(text):
+        bad.append({"claim": f"ذكر وسيلة إعلام: {h}", "verdict": "unsupported", "note": "names a competing outlet", "check_worthy": True})
+    if require_attribution and A.lacks_attribution(body):
+        bad.append({"claim": "أرقام أو حصيلة أو اتهامات بلا نسبة إلى جهة", "verdict": "unsupported",
+                    "note": "in-text attribution required (وفق …)", "check_worthy": True})
     return claims, bad
 
 
-def verify_text(llm, text, sources, kind="post", log=print):
+def verify_text(llm, text, sources, kind="post", log=print, require_attribution=False):
     sources = [s for s in sources if s and s.strip()]
     report = {"kind": kind, "rounds": []}
     try:
-        claims, bad = check(llm, text, sources)
+        claims, bad = check(llm, text, sources, require_attribution)
         report["rounds"].append({"claims": len(claims), "unsupported": [{k: b.get(k) for k in ("claim", "verdict", "note")} for b in bad]})
         if bad:
             fix = _json(llm(REPAIR + "\nالمصادر:\n" + "\n".join(sources) + "\n\nالادعاءات غير المدعومة:\n" +
@@ -144,7 +162,7 @@ def verify_text(llm, text, sources, kind="post", log=print):
             if len(fix) < 0.4 * len(text):
                 raise ValueError("repair removed too much")
             text = re.sub(r"https?://\S+|www\.\S+", "", fix)
-            claims, bad = check(llm, text, sources)
+            claims, bad = check(llm, text, sources, require_attribution)
             report["rounds"].append({"claims": len(claims), "unsupported": [{k: b.get(k) for k in ("claim", "verdict", "note")} for b in bad]})
             if bad:
                 raise ValueError(f"{len(bad)} claim(s) still unsupported after repair")

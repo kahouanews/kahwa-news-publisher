@@ -2,13 +2,30 @@
 
 Fully unattended pipeline for the **Kahwa News** Facebook Page, running free on GitHub Actions.
 
-1. `newsroom` (every 2h): reads 8 Arabic world-news outlets, clusters the same story, ranks it (outlet count, freshness, early-warning signals), keeps only stories confirmed by ≥2 outlets, filters restricted subjects, has an AI write an original Arabic post (copy-check, no links), verifies every claim against the source texts, renders a branded 1080×1350 card, queues it.
+1. `newsroom` (every 2h): reads 8 Arabic world-news outlets, clusters the same story, ranks it (outlet count, freshness, early-warning signals), keeps only stories confirmed by ≥2 outlets (internal check, never published), filters restricted subjects, has an AI write an original Arabic post (copy-check, no links) attributed to the facts' primary sources, verifies every claim and every attribution against the source texts, renders a branded 1080×1350 card, queues it.
 2. `publish` (every 20 min): posts the next due item with 40–60 min human-like spacing, failover Zernio → Buffer → Make, no duplicates, pauses everything 48h on any Facebook restriction (never retries those).
 3. `reel` (12:41 and 18:41 Algeria): picks the top verified story, an AI writes a reel script (`story.json`, every number checked against the sources), fetches openly licensed archive footage/photos (Wikimedia Commons, NASA; PD/CC0/CC BY/CC BY-SA only, credited and labelled «لقطات أرشيفية»/«صورة أرشيفية», graphic-only fallback), renders it with HyperFrames 0.8.214 (style A explainer, style B if urgent) over our own music, verifies every on-screen line and the caption claim by claim, QA's it, hosts the MP4 and queues it as kind `reel`. While `PUBLISHING_ENABLED` is not `true` it only renders and uploads the MP4 as a workflow artifact.
 4. `watchdog` (every 2h): opens a GitHub issue (= email) if nothing was published for hours or a provider lost authorization.
 
 Kill switch: repository variable `PUBLISHING_ENABLED` (must be `true`) or a file `state/PAUSE`.
-Hard content rules enforced in code: never Morocco / UAE / Algeria / Israel (incl. Arabic prefixed forms), no sports, no engagement bait, no AI-disclosure line, no AI images, no AI voice (reels are voice-free).
+Hard content rules enforced in code: never Morocco / UAE / Algeria / Israel (incl. Arabic prefixed forms), no sports, no engagement bait, no AI-disclosure line, no AI images, no AI voice (reels are voice-free), never name a competing news outlet (primary-source attribution only, see below).
+
+## Source attribution (user-approved 2026-10-29, `kahwa_publisher/attribution.py`)
+
+We attribute (Berne Convention art. 10bis, Meta's originality signal "credit the source", reader trust) but never advertise competing channels.
+
+- **Who is named:** the PRIMARY source of each fact. Ranking: official/primary body (ministry, police, civil defence, health authority, government, UN agency, court, a company's own statement, space agency, central bank, statistics office; named officials) > wire agency (AFP → «وكالة الصحافة الفرنسية», Reuters «رويترز», AP «أسوشيتد برس», dpa «الوكالة الألمانية», EFE, ANSA, Kyodo, Xinhua, TASS, Anadolu, Yonhap — when that agency is the origin) > generic «وكالات».
+- **Never named:** competing TV channels / news sites / papers (Al Jazeera, Al Arabiya/Al Hadath, Sky News Arabia, BBC Arabic, France 24, CNN, Euronews, RT, CGTN, Asharq, TRT, DW, Independent Arabia, Al-Araby, Al Mayadeen, Bloomberg, NYT, …) — not in post text, card, reel, hashtags or the source line.
+- **How it is enforced:**
+  1. The writers never see outlet names: source texts are labelled `[م1]`, `[م2]` … (posts and reels). Prompts tell them to extract the primary attribution from the texts ("قالت وزارة الصحة …", "وفق وكالة الصحافة الفرنسية") and never to name an outlet.
+  2. `sanitize()` turns "بحسب/وفق/نقلاً عن <outlet>" into "بحسب تقارير إعلامية".
+  3. **Hard gate in code after generation** (`outlet_hits`): denylist of outlet names in Arabic + Latin, with every Arabic prefixed form (و/ف + ب/ل/ك + ال, لل: «للجزيرة», «وبسكاي نيوز», «لبي بي سي»), harakat/tatweel-proof. Words that are also ordinary Arabic (الجزيرة = island/peninsula, العربية = Arabic, الحدث, الحرة, الشرق …) only count in an attribution context ("وفق الجزيرة", "قناة العربية") or as a bare item of a source line. Runs on posts, card fields, card photo credits, reel story/caption/chips (`render.gate`, `story.build_story`, `make.verify_reel`) — any hit = the post/reel is dropped. Photos/footage credited to an outlet are skipped (`cards.find_photo`, `reels.media.acceptable`).
+  4. `verify.py`: each in-text attribution ("قالت <جهة>", "وفق <جهة>") must be supported by the source text (code check + verifier prompt) — no invented «قالت وزارة …»; unsupported → repaired once, else dropped. Posts with numbers, casualty counts, accusations or contested claims must carry an in-text attribution (`require_attribution`).
+- **Final line** (built by code, never by the model): «المصدر: <up to 3 primary sources>» or «المصدر: وكالات» when only outlets are known; archive-photo credits sit above it. No links, logos, handles (@) or tags.
+- **Cards:** footer «المصدر: <primary>»; our own compilations (numbers / facts cards, maps) read «إعداد: قهوة نيوز · المصدر: …»; maps «خريطة: قهوة نيوز (بيانات Natural Earth)».
+- **Reels:** every on-screen source chip, the lower third and the end card show primary names only (fallback «وكالات»); caption bullets carry «(وفق …)»; Commons/NASA image credits stay as their licences require.
+- **Internal only:** the ≥2-outlet verification is unchanged and logged (`{"verified_by_outlets": …}` in the run log, `sources`/`verified_by_outlets` in queue items, `outlets` in the reel `summary.json`); providers never publish these fields.
+- Series tags (فهم الخبر، العالم في 30 ثانية، بالأرقام) remain our own brand. Tests: `tests/test_attribution.py`.
 
 ## Repository variables (Settings → Secrets and variables → Actions → Variables)
 

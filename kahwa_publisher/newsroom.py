@@ -9,6 +9,11 @@ the >=2-outlet rule is unchanged), fixed named series («بالأرقام» numb
 line "بالأرقام | <subject>"), and a second verification layer (verify.py: claim decomposition, every atomic claim must
 be supported by a source text, unsupported claims are repaired once, otherwise the story is dropped - fail closed).
 
+Attribution (2026-10-29, attribution.py): public text credits the PRIMARY source of each fact (official body > wire agency >
+«وكالات»), never a competing outlet; the outlet names are hidden from the writer (sources are labelled [م1], [م2] …), any
+outlet that still appears is a hard gate failure, and the last line is built by code: «المصدر: …». The >=2-outlet
+verification stays internal (run log / queue metadata).
+
 python -m kahwa_publisher.newsroom [--max 2] [--dry] [--out DIR]
   --dry: writes nothing to queue/, state/ or media/ (cards + JSON go to --out, default /tmp/kahwa-dry) - test runs.
 """
@@ -24,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import signals
+from . import attribution as A
 from .dispatcher import QUEUE, ROOT
 from .verify import check as verify_check, verify_text
 
@@ -197,16 +203,23 @@ PROMPT = """أنت محرر أول في غرفة أخبار عالمية اسم�
 - الدقة أولاً: كل جملة يجب أن تكون واضحة المعنى ومطابقة لما في المصادر حرفياً من حيث الوقائع.
 - لا تخترع أي رقم أو اسم أو تصريح غير موجود في المصادر. إذا كانت المعلومات غير مؤكدة قل "بحسب التقارير".
 - ممنوع الأخبار الرياضية تماماً. حياد تام، بلا رأي، بلا سخرية، بلا تحريض، بلا روابط. ممنوع منعاً صارماً ذكر المغرب أو الإمارات أو الجزائر أو إسرائيل بأي شكل.
-- الأسلوب مأخوذ من صفحات CNN بالعربية وسكاي نيوز عربية والجزيرة على فيسبوك: بلا أي إيموجي إطلاقاً.
+- أسلوب صفحات الأخبار العربية الكبرى على فيسبوك: بلا أي إيموجي إطلاقاً.
 - السطر الأول خطّاف قوي بإحدى الصيغ: اقتباس قصير بين علامتي تنصيص ثم ".." ثم الخبر، أو "الجهة: التصريح"، أو سؤال إخباري ثم جوابه. إذا كان عاجلاً ابدأ بـ "#عاجل | ".
 - بعده سطران أو ثلاثة قصيرة جداً بالتفاصيل الأهم فقط (المنشور كله بين 250 و550 حرفاً).
 - ثم وسم أو وسمان عربيان كحد أقصى في سطر واحد.
-- اذكر في سطر أخير: "المصادر: " ثم أسماء المؤسسات فقط بدون روابط.
+- نسبة المعلومات (إلزامي): انسب كل رقم وكل حصيلة ضحايا وكل اتهام وكل ادعاء خلافي داخل النص إلى مصدره الأصلي كما تذكره المصادر:
+  الجهة الرسمية أولاً (وزارة، شرطة، دفاع مدني، سلطات صحية، حكومة، وكالة أممية، محكمة، بيان الشركة نفسها، وكالة فضاء، بنك مركزي، مكتب إحصاء)
+  بصيغة "قالت وزارة الصحة ..." أو "وفق الدفاع المدني ..."، ثم وكالة الأنباء إن كانت هي الأصل (وكالة الصحافة الفرنسية، رويترز، أسوشيتد برس،
+  الوكالة الألمانية، إفي، أنسا، كيودو، شينخوا) بصيغة "وفق وكالة الصحافة الفرنسية". لا تنسب شيئاً إلى جهة لا تذكرها المصادر صراحة.
+- ممنوع منعاً باتاً ذكر أي قناة تلفزيونية أو موقع إخباري أو صحيفة (مثل الجزيرة، العربية، سكاي نيوز، بي بي سي، فرانس 24، سي إن إن،
+  يورونيوز، آر تي، دويتشه فيله، إندبندنت عربية، الشرق...) لا في النص ولا في الوسوم. المصادر أدناه مرقمة [م1] [م2] فقط؛ إن لم تُعرف الجهة
+  الأصلية لمعلومة فاكتب "بحسب تقارير" دون تسمية أي وسيلة إعلام.
+- لا تكتب سطر "المصادر" أو "المصدر" (نضيفه نحن آلياً)، ولا روابط ولا شعارات ولا حسابات (@) ولا إشارات.
 - ممنوع منعاً باتاً طلب التفاعل: لا "شارك" ولا "علّق" ولا "اضغط لايك" ولا "تابعونا" ولا "صوّت". يُسمح نادراً بسؤال رأي محايد واحد في النهاية.
 - لغة محايدة: افصل الوقائع عن التصريحات ("قال"، "بحسب")، بلا تهويل ولا صفات انفعالية.
 - قيمة مضافة (قاعدة الأصالة في فيسبوك): أجب ضمنياً عن "لماذا يهم هذا؟" أو "ماذا بعد؟" بجملة واحدة مستندة إلى المصادر.
 أعد JSON فقط بهذا الشكل:
-{"subject": "سطر موضوع محايد وواضح من 4 إلى 9 كلمات يقول من/ماذا/أين (مثال: حصيلة تصادم قطارين في إسبانيا)، بلا إثارة ولا سؤال", "headline": "عنوان للصورة لا يتجاوز 70 حرفاً", "highlight": "كلمتان أو ثلاث من العنوان نفسه حرفياً هي الأهم", "category": "كلمة واحدة: سياسة/اقتصاد/علوم/صحة/تكنولوجيا/بيئة/دبلوماسية/دولي", "urgent": true/false, "entity": "عنوان مقالة ويكيبيديا الإنجليزية للشخص أو المكان أو المؤسسة الأبرز في الخبر بالضبط (مثال: Emmanuel Macron)", "photo_query": "2-4 English words to find a relevant real photo", "country_en": "English name of the main country", "post": "نص المنشور كاملاً", "safe": true/false, "card_type": "اختر الأنسب: breaking (خبر عاجل حقيقي) / quote (إذا كان جوهر الخبر تصريحاً منقولاً حرفياً عن شخص مسمى) / numbers (إذا احتوت المصادر على 2-4 أرقام مهمة) / facts (خبر معقد يُشرح في 3-4 نقاط) / photo (الباقي)", "kicker": "كلمة أو كلمتان فوق العنوان: اسم البلد أو الملف (مثال: أوكرانيا، الاقتصاد العالمي)", "title": "عنوان قصير جداً للبطاقة لا يتجاوز 28 حرفاً (الخطّاف)", "subline": "سطر تحت العنوان في البطاقة 50-110 حرفاً يضيف معلومتين جديدتين على الأقل غير موجودتين في العنوان (رقم، مكان، نتيجة، موعد) من المصادر حرفياً", "quote": "للتصريح فقط: نص الاقتباس كما ورد في المصادر حرفياً، أقل من 110 حرفاً", "speaker": "اسم صاحب التصريح بالعربية", "role": "صفته", "numbers": [{"value": "رقم كما ورد في المصادر", "label": "ماذا يعني، 2-4 كلمات"}], "facts": ["نقطة قصيرة أقل من 70 حرفاً"]}
+{"attribution": ["الجهات الأصلية التي نُسبت إليها المعلومات في المصادر بالترتيب: الرسمية أولاً ثم وكالة الأنباء، بالاسم كما ورد (مثال: وزارة الصحة الإسبانية، وكالة الصحافة الفرنسية). قائمة فارغة إن لم تُذكر أي جهة. لا قنوات ولا مواقع إخبارية"], "subject": "سطر موضوع محايد وواضح من 4 إلى 9 كلمات يقول من/ماذا/أين (مثال: حصيلة تصادم قطارين في إسبانيا)، بلا إثارة ولا سؤال", "headline": "عنوان للصورة لا يتجاوز 70 حرفاً", "highlight": "كلمتان أو ثلاث من العنوان نفسه حرفياً هي الأهم", "category": "كلمة واحدة: سياسة/اقتصاد/علوم/صحة/تكنولوجيا/بيئة/دبلوماسية/دولي", "urgent": true/false, "entity": "عنوان مقالة ويكيبيديا الإنجليزية للشخص أو المكان أو المؤسسة الأبرز في الخبر بالضبط (مثال: Emmanuel Macron)", "photo_query": "2-4 English words to find a relevant real photo", "country_en": "English name of the main country", "post": "نص المنشور كاملاً", "safe": true/false, "card_type": "اختر الأنسب: breaking (خبر عاجل حقيقي) / quote (إذا كان جوهر الخبر تصريحاً منقولاً حرفياً عن شخص مسمى) / numbers (إذا احتوت المصادر على 2-4 أرقام مهمة) / facts (خبر معقد يُشرح في 3-4 نقاط) / photo (الباقي)", "kicker": "كلمة أو كلمتان فوق العنوان: اسم البلد أو الملف (مثال: أوكرانيا، الاقتصاد العالمي)", "title": "عنوان قصير جداً للبطاقة لا يتجاوز 28 حرفاً (الخطّاف)", "subline": "سطر تحت العنوان في البطاقة 50-110 حرفاً يضيف معلومتين جديدتين على الأقل غير موجودتين في العنوان (رقم، مكان، نتيجة، موعد) من المصادر حرفياً", "quote": "للتصريح فقط: نص الاقتباس كما ورد في المصادر حرفياً، أقل من 110 حرفاً", "speaker": "اسم صاحب التصريح بالعربية", "role": "صفته", "numbers": [{"value": "رقم كما ورد في المصادر", "label": "ماذا يعني، 2-4 كلمات"}], "facts": ["نقطة قصيرة أقل من 70 حرفاً"]}
 فضّل numbers أو facts كلما سمحت المصادر بذلك (بطاقات من تصميمنا تشرح الخبر)، فهي أصلية أكثر من صورة مع عنوان.
 البطاقة يجب أن تكون صحيحة 100%: كل رقم واقتباس فيها موجود حرفياً في المصادر، وإلا اختر photo.
 اجعل "safe" = false إذا كان الخبر رياضياً أو يذكر المغرب أو الإمارات أو الجزائر أو إسرائيل أو عن الدين أو يتضمن عنفاً مصوراً أو معلومات لا يمكن التحقق منها.
@@ -288,16 +301,27 @@ def llm(prompt, temperature=0.6):
 
 CHECK = """أنت مدقق حقائق صارم في وكالة أنباء دولية. قارن كل جملة في المنشور بالمصادر.
 ابحث عن: أي معلومة غير موجودة في المصادر، رقم أو اسم خاطئ، جملة مبهمة أو تغيّر المعنى، مبالغة أو رأي، ركاكة لغوية.
-إذا صححت، حافظ على نفس البنية تماماً (خطّاف أول بلا إيموجي، تفاصيل قصيرة، وسم أو وسمان، "المصادر:") وبصياغة أصلية لا تنسخ جمل المصادر.
+تحقق أيضاً من النسبة: كل "قالت/وفق/أعلنت <جهة>" يجب أن تنسب المصادر المعلومة إلى الجهة نفسها؛ وممنوع ذكر أي قناة أو موقع إخباري أو صحيفة.
+إذا صححت، حافظ على نفس البنية تماماً (خطّاف أول بلا إيموجي، تفاصيل قصيرة، وسم أو وسمان، بلا سطر مصادر) وبصياغة أصلية لا تنسخ جمل المصادر.
 أعد JSON فقط: {"ok": true/false, "problems": ["..."], "corrected_post": "المنشور بعد التصحيح بنفس البنية إن لزم", "corrected_headline": "العنوان بعد التصحيح إن لزم"}"""
 
 
+CARD_FIELDS = ("headline", "title", "subline", "kicker", "quote", "speaker", "role", "highlight", "subject")
+
+
 def write_post(c):
-    src = "\n".join(f"- [{i['src']}] {i['title']} — {i['summary'][:400]}" for i in c["items"][:6])
+    # outlet names are hidden from the writer: sources are labelled [م1], [م2] … (the outlet list stays internal)
+    items = c["items"][:6]
+    src = "\n".join(f"- [م{n + 1}] {i['title']} — {i['summary'][:400]}" for n, i in enumerate(items))
     raw = llm(PROMPT + src)
     raw = raw[raw.find("{"): raw.rfind("}") + 1]
     d = json.loads(raw)
     post = re.sub(r"https?://\S+|www\.\S+", "", d.get("post", "")).strip()
+    post = A.sanitize(A.strip_source_lines(post))                   # "بحسب قناة X" -> "بحسب تقارير إعلامية"
+    for k in CARD_FIELDS:
+        if isinstance(d.get(k), str):
+            d[k] = A.sanitize(d[k])
+    d["facts"] = [A.sanitize(f) for f in (d.get("facts") or []) if isinstance(f, str)]
     pwords = set(norm(post).split())
     if (d.get("category") or "").strip() in ("رياضة", "رياضي", "رياضية") or \
             sum((k in post) if " " in k else (norm(k) in pwords) for k in SPORTS) >= 2:
@@ -315,7 +339,7 @@ def write_post(c):
         if len(fixed) < 120:
             print(json.dumps({"qa_reason": "fact-check fix too short"}))
             return None
-        post = re.sub(r"https?://\S+|www\.\S+", "", fixed)
+        post = A.sanitize(A.strip_source_lines(re.sub(r"https?://\S+|www\.\S+", "", fixed)))
         if chk.get("corrected_headline"):
             d["headline"] = chk["corrected_headline"][:80]
     # originality guard (after any correction): reject if any 7-word run is copied from a source
@@ -325,11 +349,11 @@ def write_post(c):
     if any(" ".join(pw[i:i + 7]) in grams for i in range(len(pw) - 6)):
         print(json.dumps({"qa_reason": "copied 7-gram"}))
         return None
-    body = post.split("المصادر")[0]
+    body = A.strip_source_lines(post)
     if BAIT.search(body):
         print(json.dumps({"qa_reason": "engagement bait"}))
         return None
-    if "المصادر" not in post or re.search("[\U0001F300-\U0001FAFF\u2600-\u27BF]", post) or len(post) > 900:
+    if re.search("[\U0001F300-\U0001FAFF\u2600-\u27BF]", post) or re.search(r"(?<!\w)@\w", post) or len(post) > 900:
         print(json.dumps({"qa_reason": "structure"}))
         return None
     # ---- fixed named series: numbers cards are «بالأرقام» (series tag on the card, subject stated on caption line 1)
@@ -339,12 +363,17 @@ def write_post(c):
         subj = re.sub(r"[#|\n]+", " ", d["subject"]).strip()[:80]
         post = f"{SERIES_NUMBERS} | {subj}\n" + re.sub(r"^#عاجل \| ", "", post)
     # ---- second verification layer: atomic claims vs source texts (fail closed)
-    sources = [f"[{i['src']}] {i['title']} — {i['summary'][:600]}" for i in c["items"][:6]]
-    v = verify_text(llm, post, sources, kind="post")
+    sources = [f"[م{n + 1}] {i['title']} — {i['summary'][:600]}" for n, i in enumerate(items)]
+    v = verify_text(llm, post, sources, kind="post", require_attribution=True)
     if not v:
         print(json.dumps({"qa_reason": "claim verification failed"}))
         return None
-    post = v["text"]
+    post = A.sanitize(A.strip_source_lines(v["text"]))
+    # ---- attribution: «المصدر: <primary sources>» built by code from names the source texts support (else «وكالات»)
+    all_src = "\n".join(sources)
+    cands = list(d.get("attribution") or []) + [e for e in A.attributions(post) if A.classify(e) in ("official", "wire")]
+    line, primary = A.source_line(cands, all_src)
+    d["attribution"], d["source_line"] = primary, line
     card_lines = [d.get("headline"), d.get("title"), d.get("subline"), d.get("quote")] + list(d.get("facts") or []) + \
                  [f"{n.get('value', '')} {n.get('label', '')}" for n in (d.get("numbers") or []) if isinstance(n, dict)]
     card_text = "\n".join(x.strip() for x in card_lines if isinstance(x, str) and x.strip())
@@ -360,11 +389,27 @@ def write_post(c):
     # the repaired text passes every hard gate again
     pwords = set(norm(post).split())
     pw = norm(post).split()
-    if banned_country(post) or any(b in post for b in BLOCK) or BAIT.search(post.split("المصادر")[0]) or \
+    if banned_country(post) or any(b in post for b in BLOCK) or BAIT.search(post) or \
             sum((k in post) if " " in k else (norm(k) in pwords) for k in SPORTS) >= 2 or \
-            any(" ".join(pw[i:i + 7]) in grams for i in range(len(pw) - 6)) or "المصادر" not in post or len(post) > 950:
+            any(" ".join(pw[i:i + 7]) in grams for i in range(len(pw) - 6)) or len(post) > 950:
         print(json.dumps({"qa_reason": "verified text failed a hard gate"}))
         return None
+    # ---- attribution hard gates (code, after generation): no competing outlet anywhere public, sourced attributions only,
+    # numbers / casualty counts / accusations carry an in-text attribution
+    public = "\n".join([post, line] + [d.get(k) for k in CARD_FIELDS if isinstance(d.get(k), str)] + list(d.get("facts") or []) +
+                       [f"{n.get('value', '')} {n.get('label', '')}" for n in (d.get("numbers") or []) if isinstance(n, dict)])
+    hits = A.outlet_hits(public)
+    if hits:
+        print(json.dumps({"qa_reason": "names a competing outlet", "hits": hits[:5]}, ensure_ascii=False))
+        return None
+    bad_attr = A.unsupported_attributions(post, all_src)
+    if bad_attr:
+        print(json.dumps({"qa_reason": "unsupported attribution", "attr": bad_attr[:4]}, ensure_ascii=False))
+        return None
+    if A.lacks_attribution(post):
+        print(json.dumps({"qa_reason": "numbers/casualties/accusations without in-text attribution"}, ensure_ascii=False))
+        return None
+    post = A.set_source_line(post, line)
     d["verification"] = v["report"]
     d["post"] = post
     blob = post + " " + (d.get("headline") or "") + " " + (d.get("title") or "")
@@ -537,13 +582,16 @@ def main():
         ct = d.get("card_type") or "photo"
         if d.get("urgent") and ct == "photo":
             ct = "breaking"
-        res = render_card(dict(d, card_type=ct, source="، ".join(c["sources"][:3])), img)
+        res = render_card(dict(d, card_type=ct, source="، ".join(d.get("attribution") or []) or A.GENERIC), img)
         credit = res["credit"]
-        if credit and not credit.startswith("خريطة"):
-            d["post"] += f"\nصورة أرشيفية: {credit}"
+        if credit and not credit.startswith("خريطة"):     # photo credit above the final «المصدر:» line
+            d["post"] = A.set_source_line(A.strip_source_lines(d["post"]) + f"\nصورة أرشيفية: {credit}", d["source_line"])
+        print(json.dumps({"verified_by_outlets": c["sources"], "attribution": d.get("attribution") or [A.GENERIC]},
+                         ensure_ascii=False))              # internal log only (requirement: >=2 outlets, never published)
         url = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/media/{img.name}"
         post = {"id": sid, "text": d["post"], "media": [{"type": "image", "url": url}], "kind": "post",
-                "title": d.get("headline_full") or d["headline"], "priority": 3 if d.get("urgent") else 5, "sources": c["sources"],
+                "title": d.get("headline_full") or d["headline"], "priority": 3 if d.get("urgent") else 5, "sources": c["sources"],   # internal: outlets used for verification, never published
+                "attribution": d.get("attribution") or [A.GENERIC],
                 "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
                 # give GitHub time to serve the pushed image before any provider fetches it
                 "not_before": datetime.fromtimestamp(time.time() + 900, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")}

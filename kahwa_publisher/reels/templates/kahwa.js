@@ -234,7 +234,7 @@
     tl.fromTo(tag, { y: 24, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.4, ease: E.enter, immediateRender: true }, t + 0.5);
     const rule = el("div", "abs", d, null, { left: "340px", width: "400px", top: "850px", height: "3px", background: "var(--red)", transformOrigin: "100% 50%" });
     tl.fromTo(rule, { scaleX: 0 }, { scaleX: 1, duration: 0.45, ease: E.enter, immediateRender: true }, t + 0.55);
-    const srcs = el("div", "endline", d, `<div style="font-size:30px;color:var(--muted);font-weight:700;margin-bottom:18px">المصادر</div>`, { top: "890px" });
+    const srcs = el("div", "endline", d, `<div style="font-size:30px;color:var(--muted);font-weight:700;margin-bottom:18px">المصدر</div>`, { top: "890px" });
     const chips = (opt.sources || S.sources).map((x) => el("span", "chip", srcs, bidi(x)));
     tl.fromTo(chips, { scale: 0.9, autoAlpha: 0 }, { scale: 1, autoAlpha: 1, duration: 0.25, ease: E.enter, stagger: 0.1, immediateRender: true }, t + 0.7);
     const used = opt.credits || [];
@@ -540,7 +540,7 @@
     srcTag(nd, S.secondary_fact.source, nt + 1.2);
     tl.to(base, { autoAlpha: 0, duration: 0.001 }, SC.end.t);
     P.wipes.forEach(redWipe);
-    endCard("end", { credits: ["خريطة: Natural Earth (ملكية عامة)"].concat(endCredits()) });
+    endCard("end", { credits: ["خريطة: قهوة نيوز · بيانات Natural Earth (ملكية عامة)"].concat(endCredits()) });
   }
 
   // ================================================================= STYLE D — "صورة حية"

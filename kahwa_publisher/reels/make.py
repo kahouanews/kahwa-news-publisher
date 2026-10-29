@@ -19,6 +19,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from .. import attribution as A
 from . import media as M
 from .render import gate, render_story
 from .story import write_story
@@ -45,14 +46,29 @@ def subject_line(S):
     return re.sub(r"\s+", " ", plain(S.get("headline") or "")).strip(" .،|")
 
 
+def _fact_line(f):
+    """Caption bullet with its in-text attribution: «… (وفق وزارة الصحة)». Figures / casualties / accusations whose
+    primary source is unknown get «(وفق وكالات)»; plain facts from unknown origin stay unattributed in-line."""
+    t = plain(f.get("text")).strip()
+    src = (f.get("source") or "").strip()
+    if A.ATTR_RE.search(t):
+        return f"- {t}"
+    if src and src != A.GENERIC:
+        return f"- {t} (وفق {src})"
+    if A.NEEDS_ATTR_RE.search(t):
+        return f"- {t} (وفق {A.GENERIC})"
+    return f"- {t}"
+
+
 def post_text(S, style="A"):
-    """Caption. Line 1 is always '<series> | <subject>' so the topic lane and the subject are clear from the first line."""
+    """Caption. Line 1 is always '<series> | <subject>'; the last line is «المصدر: <primary sources>» (or «وكالات»)."""
     lines = [f"{SERIES.get(style, SERIES['A'])} | {subject_line(S)}", plain(S["deck"]), ""]
-    lines += [f"- {plain(f['text'])}" for f in S["facts"]]
-    lines += ["", "المصادر: " + "، ".join(S["sources"][:4])]
+    lines += [_fact_line(f) for f in S["facts"]]
+    lines.append("")
     if S.get("media"):
         names = list(dict.fromkeys(m["credit_short"] for m in S["media"].values()))[:4]
         lines.append("صور ولقطات أرشيفية: " + "، ".join(names))
+    lines.append("المصدر: " + "، ".join((S.get("sources") or [A.GENERIC])[:3]))
     return "\n".join(lines).strip()
 
 
@@ -80,8 +96,12 @@ def verify_reel(S, style, summary):
     srcs = [p.strip() for p in re.split(r"\n(?=- \[)", S["source_texts"]) if p.strip()]
     S["series_ar"] = SERIES[style]
     screen = reel_text_lines(S, style) + post_text(S, style).split("\n")
-    txt = "\n".join(dict.fromkeys(l for l in screen if l and not l.startswith(("المصادر", "صور ولقطات"))))
+    txt = "\n".join(dict.fromkeys(l for l in screen if l and not l.startswith(("المصادر", "المصدر:", "صور ولقطات"))))
     claims, bad = vcheck(_llm, txt, srcs)
+    oh = A.outlet_hits(post_text(S, style) + "\n" + json.dumps({k: v for k, v in S.items() if k not in
+                                                              ("source_texts", "source_urls", "media_rejected", "media")}, ensure_ascii=False))
+    if oh:
+        bad.append({"claim": "ذكر وسيلة إعلام: " + "، ".join(oh[:3]), "verdict": "unsupported", "note": "names a competing outlet"})
     summary.setdefault("verification", []).append(
         {"claims": len(claims), "unsupported": [{"claim": b["claim"], "verdict": b["verdict"], "note": b["note"]} for b in bad]})
     return bad
@@ -152,7 +172,8 @@ def main():
         (out / "story.json").write_text(json.dumps(S, ensure_ascii=False, indent=1))
         mp4 = out / f"{S['id']}-reel.mp4"
         res = render_story(S, style, mp4, build=build, media_root=media_root, workers=a.workers)
-        summary.update(style=style, series=S["series_ar"], caption_first_line=post_text(S, style).split("\n")[0], qa=res,
+        summary.update(style=style, series=S["series_ar"], caption_first_line=post_text(S, style).split("\n")[0],
+                       caption=post_text(S, style), attribution=S.get("sources"), qa=res,
                        t_total_s=round(time.time() - t0, 1))
         if res["problems"]:
             raise RuntimeError(f"QA failed, reel NOT queued: {res['problems']}")
@@ -161,6 +182,7 @@ def main():
             now = datetime.now(timezone.utc)
             item = {"id": S["id"] + "-reel", "kind": "reel", "text": post_text(S, style), "title": plain(S["headline"])[:90],
                     "media": [{"type": "video", "url": url}], "priority": 4 if style == "B" else 6, "sources": S["sources"],
+                    "verified_by_outlets": c["sources"],   # internal only
                     "created": now.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
                     "not_before": (now + timedelta(minutes=45)).strftime("%Y-%m-%dT%H:%M:%S+00:00"), "style": style}
             (out / "queue-item.json").write_text(json.dumps(item, ensure_ascii=False, indent=1))

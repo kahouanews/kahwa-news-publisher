@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 from . import audio, mix, plates
+from ..attribution import outlet_hits
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent                         # repo root
@@ -66,11 +67,17 @@ def gate(story):
         hits.append("ai_line present (user hard rule: no AI-assisted line)")
     if BAIT.search(blob):
         hits.append("engagement bait")
+    # attribution policy (2026-10-29): never name a competing outlet on screen / in chips (media credits checked below)
+    oh = outlet_hits(json.dumps({k: v for k, v in vis.items() if k != "media"}, ensure_ascii=False))
+    if oh:
+        hits.append(f"competing outlet named: {oh[:4]}")
     if hits:
         raise ValueError(f"GATE FAIL: {hits}")
     for mid, m in story.get("media", {}).items():
         if not m.get("credit") or not m.get("license") or not re.search(r"ويكيميديا|NASA|NOAA", m["credit"]):
             raise ValueError(f"GATE FAIL: media {mid} lacks an open-licence credit")
+        if outlet_hits(m.get("credit", "") + " " + m.get("credit_short", "")):
+            raise ValueError(f"GATE FAIL: media {mid} is credited to a competing outlet")
         if m.get("archive") and m.get("label") not in ("لقطات أرشيفية", "صورة أرشيفية"):
             raise ValueError(f"GATE FAIL: archive media {mid} lacks its archive label")
     return True

@@ -13,12 +13,15 @@ albums), BBC Arabic and France 24 Facebook/Instagram output (Oct 2026):
   map       — country map in a frame + headline (fallback when no photo exists)
 
 All text is right-to-left via Raqm. Every card carries a source line and a photo credit.
+Source line (2026-10-29): «المصدر: <primary source>» (official body > wire agency > «وكالات»), never a competing outlet;
+our own compilations (numbers / facts cards, maps) add «إعداد: قهوة نيوز». Photos credited to an outlet are skipped.
 """
 from datetime import datetime, timezone
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from . import attribution as A
 from .card import cover, map_image, wiki_photo, commons_photo, openverse_photo
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
@@ -128,9 +131,21 @@ def header(d, kicker, title, hl=(), title_lines=2, kicker_color=RED):
     return y + 60
 
 
-def footer(d, source, credit):
+def source_label(source, compiled=False):
+    """Card source text. Outlet names can never reach a card (falls back to «وكالات»)."""
+    src = (source or "").strip()
+    if not src or A.outlet_hits("المصدر: " + src):
+        src = A.GENERIC
+    return (f"إعداد: {A.OURS} · " if compiled else "") + "المصدر: " + src
+
+
+def footer(d, source, credit, compiled=False):
     d.line([(64, H - 96), (W - 64, H - 96)], fill=PANEL_LINE, width=2)
-    T(d, (W - 64, H - 56), ("المصدر: " + source) if source else "قهوة نيوز", F("Bold", 24), MUTED)
+    lab = source_label(source, compiled)
+    f = F("Bold", 24)
+    while tl(d, lab, f) > W - 128 - 260 and f.size > 16:
+        f = F("Bold", f.size - 2)
+    T(d, (W - 64, H - 56), lab, f, MUTED)
     lw = LAT(30)
     d.text((64, H - 56), "KAHWA", font=lw, fill=WHITE, anchor="lm")
     bx = 64 + d.textlength("KAHWA", font=lw) + 8
@@ -151,7 +166,11 @@ def framed(canvas, img, box, radius=30):
 
 
 def find_photo(entity=None, photo_query=None):
-    return wiki_photo(entity) or commons_photo(photo_query) or openverse_photo(photo_query)
+    for get in (lambda: wiki_photo(entity), lambda: commons_photo(photo_query), lambda: openverse_photo(photo_query)):
+        ph = get()
+        if ph and not A.outlet_hits(ph[1] or ""):      # never credit (= advertise) a competing outlet under our card
+            return ph
+    return None
 
 
 # ------------------------------------------------------------------ templates
@@ -301,7 +320,11 @@ def overlay(p, photo, out):
     d.polygon([(W - 60 - 84, 58), (W - 60, 58), (W - 66, 90), (W - 150, 90)], fill=RED)
     d.text((W - 60 - 75, 74), "NEWS", font=LAT(20), fill=WHITE, anchor="mm")
     d.line([(60, H - 100), (W - 60, H - 100)], fill=(60, 66, 80), width=2)
-    T(d, (W - 60, H - 56), ("المصدر: " + p["source"]) if p.get("source") else "قهوة نيوز", F("Bold", 30), MUTED)
+    lab = source_label(p.get("source"))
+    fo = F("Bold", 30)
+    while tl(d, lab, fo) > W - 120 - 300 and fo.size > 18:
+        fo = F("Bold", fo.size - 2)
+    T(d, (W - 60, H - 56), lab, fo, MUTED)
     now = datetime.now(timezone.utc)
     T(d, (60, H - 56), f"{now.day} {MONTHS[now.month - 1]} {now.year}", F("Bold", 30), MUTED, "la")
     if credit:
@@ -336,6 +359,6 @@ def render_card(p, out):
     c = background()
     d = ImageDraw.Draw(c)
     credit = TEMPLATES[ctype](c, d, p, photo, mp)
-    footer(d, p.get("source", ""), credit)
+    footer(d, p.get("source", ""), credit, compiled=ctype in ("numbers", "facts", "map"))
     c.save(out, "JPEG", quality=93, optimize=True, progressive=True)
     return {"card_type": ctype, "credit": credit}

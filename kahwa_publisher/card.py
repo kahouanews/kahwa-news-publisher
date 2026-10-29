@@ -156,7 +156,7 @@ def map_image(country_en):
     px, py = (cx - x0) / (x1 - x0) * W * S, (y1 - cy) / (y1 - y0) * PH * S
     for rad, a in ((90, 40), (55, 90)):
         d.ellipse([px - rad * S, py - rad * S, px + rad * S, py + rad * S], outline=(255, 255, 255), width=2 * S)
-    return im.resize((W, PH), Image.LANCZOS), "خريطة: Natural Earth"
+    return im.resize((W, PH), Image.LANCZOS), "خريطة: قهوة نيوز (بيانات Natural Earth)"
 
 
 # ------------------------------------------------------------------ composition

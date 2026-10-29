@@ -17,6 +17,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..attribution import outlet_hits
 from .render import banned_hits
 
 UA = "KahwaNewsReelBot/1.0 (https://github.com/kahouanews/kahwa-news-publisher; contact via GitHub issues)"
@@ -96,6 +97,8 @@ def acceptable(c, story_date=None):
         return False, "licence " + (c["license"] or "?")
     if c["source"] == "nasa" and re.search(r"©|copyright|courtesy|esa/|jaxa|getty|ap photo|reuters|afp", text, re.I):
         return False, "nasa third-party"
+    if outlet_hits(str(c.get("author", "")) + " " + str(c.get("secondary", ""))):
+        return False, "credited to a competing news outlet (attribution policy: never advertise competitors)"
     if c.get("restrictions"):
         return False, "restrictions " + c["restrictions"][:40]
     if AI_RE.search(text):
