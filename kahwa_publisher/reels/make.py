@@ -22,7 +22,7 @@ from pathlib import Path
 from .. import attribution as A
 from . import media as M
 from .render import gate, render_story
-from .story import write_story
+from .story import drop_unverifiable_captions, write_story
 
 REPO = os.getenv("GITHUB_REPOSITORY", "kahouanews/kahwa-news-publisher")
 MEDIA_BRANCH = os.getenv("REELS_MEDIA_BRANCH", "reels-media")
@@ -140,12 +140,16 @@ def main():
             summary["story_titles"] = [i["title"] for i in c["items"][:4]]
             summary["outlets"] = c["sources"]
             S, _src = write_story(llm, c["items"], c["sources"], sid, fetch_articles=not a.no_articles, log=log)
-            for attempt in range(2):
+            dropped = False
+            for attempt in range(3):
                 bad = verify_reel(S, "B" if S.get("urgent") else "A", summary)
                 if not bad:
                     break
-                if attempt == 1:
-                    raise RuntimeError(f"claim verification failed twice, reel NOT made: {bad[:3]}")
+                if not dropped and drop_unverifiable_captions(S, [b["claim"] for b in bad], log=log):
+                    dropped = True                     # unverifiable image caption / ticker: drop it, re-verify the rest
+                    continue
+                if attempt == 2:
+                    raise RuntimeError(f"claim verification failed, reel NOT made: {bad[:3]}")
                 hint = ("هذه الأسطر غير مدعومة بالمصادر، احذفها أو اكتبها بما تقوله المصادر حرفياً فقط: " +
                         " | ".join(b["claim"] for b in bad[:6]))
                 log({"reel_verify_retry": bad[:6]})

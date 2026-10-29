@@ -5,6 +5,11 @@
  */
 (function () {
   const R = window.REEL, S = R.story, P = R.plan, STYLE = R.style, M = R.media, BOX = R.box;
+  // HARD RULE: Morocco (+ Western Sahara), UAE, Algeria, Israel are never drawn, outlined, shaded or labelled. They are not
+  // in world.js; this filter is defence in depth. A map is only drawn where story.py found a safe camera (location.map.ok).
+  const BANNED_MAP = ["MAR", "ARE", "DZA", "ISR", "ESH", "SAH"];
+  if (window.WORLD) window.WORLD.features = window.WORLD.features.filter((f) => !BANNED_MAP.includes(String(f.properties.a).toUpperCase()));
+  const MAPOK = !!(S.location && S.location.map && S.location.map.ok && window.WORLD);
   gsap.registerPlugin(CustomEase);
   const E = {
     enter: CustomEase.create("enter", "0.16,1,0.3,1"),
@@ -298,33 +303,35 @@
       const s = SC.map, t = s.t, d = scene("map");
       el("div", "full", d, null, { background: "var(--ink)" });
       const loc = S.location;
+      if (MAPOK) {
+      const mv = loc.map;
       const lab = el("div", "map-label pill", d, esc(loc.label_ar));
-      const sea = el("div", "map-label sea-label", d, esc(loc.sea_ar || ""));
-      if (!loc.sea_ar || !loc.sea_point) sea.style.display = "none";
-      const tf = WORLD.features.find((f) => f.properties.a === loc.country_iso3);
-      const cen = loc.center || (tf ? d3.geoCentroid(tf) : [loc.point.lon, loc.point.lat]);
-      let zs = 1000;
-      if (tf) { const b = d3.geoBounds(tf); let dl = b[1][0] - b[0][0]; if (dl < 0) dl += 360;
-        const ext = Math.max(dl * Math.cos(cen[1] * Math.PI / 180), b[1][1] - b[0][1], 2.5);
-        zs = Math.max(480, Math.min(4200, 560 / (ext * Math.PI / 180))); }
+      const cen = [mv.lon, mv.lat];
       const city = el("div", "map-label pill dark", d, esc(loc.point.label_ar));
       const m = makeMap(d, {
-        iso3: loc.country_iso3, point: loc.point, state: { lon: 30, lat: 18, scale: 430, cx: 540, cy: 760 },
+        iso3: loc.country_iso3, point: loc.point, state: { lon: mv.lon, lat: mv.lat, scale: mv.s0, cx: 540, cy: mv.cy },
         onRender: [(proj) => {
           const a = proj(cen) || [-900, 0]; lab.style.left = a[0] + "px"; lab.style.top = a[1] - 30 + "px";
-          const sp = proj(loc.sea_point || [0, 0]) || [-500, 0]; sea.style.left = sp[0] + "px"; sea.style.top = sp[1] + "px";
           const cp = proj([loc.point.lon, loc.point.lat]) || [-500, 0]; city.style.left = cp[0] - 150 + "px"; city.style.top = cp[1] + 8 + "px";
         }],
       });
-      d.insertBefore(m.svg, lab); [lab, sea, city].forEach(center);
-      m.to({ lon: cen[0], lat: cen[1] }, t + 0.1, 1.6, E.camera);
-      m.to({ scale: zs, cy: 600 }, t + 1.3, 1.4, E.camera);
-      m.to({ fill: 1 }, t + 1.5, 0.5, E.enter);
-      m.to({ dot: 1 }, t + 2.4, 0.3, E.enter);
-      m.to({ ring: 3 }, t + 2.4, 2.4, "none");
-      tl.fromTo(lab, { autoAlpha: 0, x: 40 }, { autoAlpha: 1, x: 0, duration: 0.35, ease: E.enter, immediateRender: true }, t + 1.8);
-      tl.fromTo(city, { autoAlpha: 0, x: 40 }, { autoAlpha: 1, x: 0, duration: 0.35, ease: E.enter, immediateRender: true }, t + 2.6);
-      tl.fromTo(sea, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.5, ease: E.enter, immediateRender: true }, t + 2.2);
+      d.insertBefore(m.svg, lab); [lab, city].forEach(center);
+      // safe camera only (story.py checked both scales): slow push-in, no wide globe
+      m.to({ scale: mv.s1 }, t + 0.1, 2.4, E.camera);
+      m.to({ fill: 1 }, t + 0.6, 0.5, E.enter);
+      m.to({ dot: 1 }, t + 1.6, 0.3, E.enter);
+      m.to({ ring: 3 }, t + 1.6, 2.4, "none");
+      tl.fromTo(lab, { autoAlpha: 0, x: 40 }, { autoAlpha: 1, x: 0, duration: 0.35, ease: E.enter, immediateRender: true }, t + 1.0);
+      tl.fromTo(city, { autoAlpha: 0, x: 40 }, { autoAlpha: 1, x: 0, duration: 0.35, ease: E.enter, immediateRender: true }, t + 1.8);
+      } else {
+        // no safe map view (a banned territory's gap would show): place card without any map
+        el("div", "gridbg", d, null, { opacity: 0.5 }); el("div", "glow", d, null, { top: "700px" });
+        const lab = el("div", "map-label pill", d, esc(loc.label_ar), { left: "540px", top: "640px", fontSize: "64px" });
+        const city = el("div", "map-label pill dark", d, esc(loc.point.label_ar), { left: "540px", top: "760px" });
+        [lab, city].forEach(center);
+        tl.fromTo(lab, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.4, ease: E.enter, immediateRender: true }, t + 0.5);
+        tl.fromTo(city, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.4, ease: E.enter, immediateRender: true }, t + 1.0);
+      }
       el("div", "scrim-b", d, null, { opacity: 0.9 });
       // first the category line, then the lower third (name tab + role panel + source)
       const cb = capBlock(d, S.where_line || S.category_line, t + 0.3, { tab: "أين؟", cls: "h3" });
@@ -588,12 +595,10 @@
     const g = document.getElementById("ground");
     el("div", "gridbg", g, null, { opacity: 0.45 }); el("div", "glow", g, null, { top: "760px", opacity: 0.8 });
     const loc = S.location || {};
-    if (!loc.country_iso3 || !window.WORLD) return;
-    const tf = WORLD.features.find((f) => f.properties.a === loc.country_iso3);
-    const cen = loc.center || (tf ? d3.geoCentroid(tf) : (loc.point ? [loc.point.lon, loc.point.lat] : [20, 20]));
+    if (!loc.country_iso3 || !MAPOK) return;          // no safe camera -> grid + glow only, never a wide globe
+    const mv = loc.map;
     const gl = el("div", "full", g, null, { opacity: 0.32 });
-    const m = makeMap(gl, { iso3: loc.country_iso3, point: loc.point, state: { lon: cen[0] + 25, lat: cen[1] * 0.6, scale: 620, cx: 540, cy: 980, fill: 0.6, dot: 0.8 } });
-    m.to({ lon: cen[0] - 25 }, 0, P.duration, "none");
+    makeMap(gl, { iso3: loc.country_iso3, point: loc.point, state: { lon: mv.lon, lat: mv.lat, scale: mv.s0, cx: 540, cy: mv.cy, fill: 0.6, dot: 0.8 } });
   }
   if (P.plates.length < (STYLE === "A" ? 10 : 5)) graphicGround();
 

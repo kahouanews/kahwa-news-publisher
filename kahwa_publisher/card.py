@@ -106,17 +106,22 @@ def wiki_photo(entity):
 
 
 # ------------------------------------------------------------------ vector map fallback
+LAST_DRAWN = []          # ISO3 codes drawn by the last map_image() call (tests assert no banned territory is ever in it)
+
+
 def map_image(country_en):
-    try:
-        geo = json.loads((ASSETS / "countries.geojson").read_text())
-    except Exception:
+    """Country map (target in red, neighbours in slate). Banned territories (Morocco incl. Western Sahara, UAE, Algeria,
+    Israel) are not in the data at all (geo.features); if their empty space would show inside the frame the crop is
+    tightened once, otherwise None is returned and the caller uses a non-map card."""
+    from . import geo
+    LAST_DRAWN.clear()
+    feats = geo.features()
+    q = (country_en or "").strip().lower()
+    if not q or any(b in q for b in geo.BANNED_MAP_NAMES):
         return None
-    target = None
-    for f in geo["features"]:
-        if country_en and country_en.lower() in (f["properties"]["n"] or "").lower():
-            target = f
-            break
-    if not target:
+    target = next((f for f in feats if (f["properties"]["n"] or "").lower() == q), None) or \
+        next((f for f in feats if q in (f["properties"]["n"] or "").lower()), None)
+    if not target or geo.is_banned_feature(target):
         return None
 
     def rings(g):
@@ -132,10 +137,18 @@ def map_image(country_en):
     ys = [y for _, y in main]
     cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
     base = max(max(xs) - min(xs), (max(ys) - min(ys)) * W / PH, 12)
-    span = base * (2.6 if base < 40 else 1.8 if base < 90 else 1.35)
-    x0, x1 = cx - span / 2, cx + span / 2
-    yspan = span * PH / W
-    y0, y1 = cy - yspan / 2, cy + yspan / 2
+    view = None
+    for mult in ((2.6 if base < 40 else 1.8 if base < 90 else 1.35), 1.12, 1.0):   # normal crop, then tighter crops
+        span = base * mult
+        x0, x1 = cx - span / 2, cx + span / 2
+        yspan = span * PH / W
+        y0, y1 = cy - yspan / 2, cy + yspan / 2
+        if geo.view_clear(x0, y0, x1, y1):
+            view = (x0, y0, x1, y1)
+            break
+    if view is None:
+        return None                                               # a banned territory's gap would show -> no map
+    x0, y0, x1, y1 = view
     S = 2
     im = Image.new("RGB", (W * S, PH * S), (12, 22, 40))
     d = ImageDraw.Draw(im)
@@ -147,7 +160,10 @@ def map_image(country_en):
     def P(r):
         return [((x - x0) / (x1 - x0) * W * S, (y1 - y) / (y1 - y0) * PH * S) for x, y in r]
 
-    for f in geo["features"]:
+    for f in feats:
+        if geo.is_banned_feature(f):                              # never (already absent from the data)
+            continue
+        LAST_DRAWN.append(f["properties"].get("a"))
         for r in rings(f["geometry"]):
             for off in (0, 360, -360):
                 d.polygon(P([(x + off, y) for x, y in r]), fill=(32, 46, 72), outline=(60, 78, 110))

@@ -63,6 +63,15 @@ def gate(story):
     loc = story.get("location", {})
     if loc.get("country_iso3") in BANNED_ISO:
         hits.append("map:" + loc.get("country_iso3", ""))
+    mv = loc.get("map") or {}
+    if mv.get("ok"):                     # re-check the camera: no banned territory's gap may be visible in the map scene
+        from .. import geo
+        if not all(geo.ortho_view_clear(mv["lon"], mv["lat"], sc, 540, mv.get("cy", 600)) for sc in (mv["s0"], mv["s1"])):
+            hits.append("map view shows a banned territory area")
+    from .. import safety
+    vh = safety.output_hits(blob)
+    if vh:                                            # user hard rule: no war / violence in reels
+        hits.append(f"violence/war terms: {vh[:4]}")
     if story.get("ai_line"):
         hits.append("ai_line present (user hard rule: no AI-assisted line)")
     if BAIT.search(blob):

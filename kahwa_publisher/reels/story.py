@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import attribution as A
+from .. import geo
+from .. import safety
 from .render import ASSETS, BANNED_ISO, banned_hits
 
 AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
@@ -27,6 +29,7 @@ PROMPT = """أنت محرر فيديو في غرفة أخبار عالمية ا�
 قواعد صارمة:
 - كل رقم تكتبه يجب أن يكون موجوداً حرفياً في المصادر بنفس الأرقام (لا تحسب ولا تقرّب ولا تحوّل الوحدات ولا تكتب أرقاماً غير موجودة). إن لم توجد أرقام كافية فاكتب الوقائع بلا أرقام.
 - لا تخترع أي اسم أو مكان أو تصريح، ولا تضف أسباباً أو تفسيرات أو اتهامات (مثل الإهمال أو التقصير) غير مذكورة حرفياً في المصادر. حياد تام، بلا رأي ولا تهويل ولا صفات انفعالية، بلا إيموجي، بلا روابط.
+- ممنوع منعاً باتاً أي حرب أو عنف: لا هجمات ولا صواريخ ولا مسيرات ولا اعتراض ولا قصف ولا اشتباكات ولا عمليات عسكرية ولا أسلحة، ولا كلمة "حرب" (إن كان الخبر كذلك فاجعل safe = false).
 - ممنوع منعاً باتاً ذكر المغرب أو الإمارات أو الجزائر أو إسرائيل بأي شكل، وممنوع الرياضة، وممنوع طلب التفاعل (شارك، علّق، تابع...).
 - النسبة: حقل "source" لكل سطر = الجهة الأصلية للمعلومة كما تذكرها المصادر صراحة: جهة رسمية أولاً (وزارة، شرطة، دفاع مدني، سلطات صحية،
   حكومة، وكالة أممية، محكمة، الشركة نفسها، وكالة فضاء، بنك مركزي، مكتب إحصاء) ثم وكالة الأنباء إن كانت هي الأصل (وكالة الصحافة الفرنسية،
@@ -35,7 +38,7 @@ PROMPT = """أنت محرر فيديو في غرفة أخبار عالمية ا�
   آر تي، دويتشه فيله، إندبندنت عربية...) في أي حقل. لا تنسب معلومة لجهة لا تذكرها المصادر.
   ذِكر الجهة في الخبر لا يجعلها مصدراً: انسب المعلومة إلى جهة فقط إذا قالت المصادر إن هذه الجهة هي التي أعلنتها أو صرّحت بها (قال/أعلن/بيان/وفق).
 - ضع الكلمة أو العبارة الأهم (كلمة إلى ثلاث كلمات) بين [[ ]] مرة واحدة على الأكثر في كل سطر.
-- الأطوال: العنوان حتى 45 حرفاً، كل نقطة حتى 60 حرفاً، كل سطر عاجل حتى 55 حرفاً.
+- الأطوال (إلزامية، تُعدّ الحروف بدون [[ ]]): العنوان حتى 42 حرفاً، كل نقطة حتى 60 حرفاً، كل سطر عاجل حتى 55 حرفاً.
 - footage_queries: 3 إلى 5 عبارات بحث إنجليزية قصيرة (2-4 كلمات) لإيجاد صور/لقطات أرشيفية حقيقية في ويكيميديا كومنز للمكان أو الظاهرة
   (مثال: "Luzon rice fields", "volcano eruption ash cloud", "satellite image typhoon"). ممنوع: أشخاص بأسمائهم، حرب، أسلحة، جثث، دماء، احتجاجات، شرطة.
 - lat/lon: إحداثيات المكان الرئيسي للخبر (مدينة أو منطقة) بدقة، داخل البلد المذكور.
@@ -120,7 +123,7 @@ _GEO = None
 def countries():
     global _GEO
     if _GEO is None:
-        _GEO = {f["properties"]["a"]: f for f in json.loads((ASSETS / "countries.geojson").read_text())["features"]}
+        _GEO = {f["properties"]["a"]: f for f in geo.features()}          # banned territories are not in the map data
     return _GEO
 
 
@@ -153,6 +156,23 @@ def centroid(iso3):
     f = countries()[iso3]
     pts = max(_rings(f["geometry"]), key=len)
     return [round(sum(p[0] for p in pts) / len(pts), 3), round(sum(p[1] for p in pts) / len(pts), 3)]
+
+
+def map_view(iso3, lon, lat):
+    """Safe camera for the reel map scene (geo.reel_map_view): same zoom formula as kahwa.js, then tighter zooms until no
+    banned territory's gap is visible; {"ok": False} -> the map scene is drawn without any map."""
+    f = countries().get(iso3)
+    if not f:
+        return {"ok": False}
+    rings = _rings(f["geometry"])
+    xs = [x for r in rings for x, _ in r]
+    ys = [y for r in rings for _, y in r]
+    dl = max(xs) - min(xs)
+    dl = dl if dl <= 180 else 360 - dl
+    import math
+    ext = max(dl * math.cos(math.radians((max(ys) + min(ys)) / 2)), max(ys) - min(ys), 2.5)
+    zs = max(480, min(4200, 560 / math.radians(ext)))
+    return geo.reel_map_view(iso3, {"lon": lon, "lat": lat}, zs)
 
 
 # ------------------------------------------------------------------ build + validate
@@ -213,10 +233,10 @@ def build_story(d, items, src_text, sid, outlets):
     S = {
         "id": sid, "date_ar": date_ar(), "topic_ar": _clean(d.get("topic_ar"), 24),
         "headline": _clean(d.get("headline"), 50), "headline_breaking": _clean(d.get("headline_breaking") or d.get("headline"), 50),
-        "deck": _clean(d.get("deck"), 64), "visual_caption": _clean(d.get("visual_caption") or d.get("deck"), 56),
+        "deck": _clean(d.get("deck"), 64), "visual_caption": _clean(d.get("visual_caption"), 56) if d.get("visual_caption") else "",   # "" -> the deck shows
         "visual_tab": _clean(d.get("topic_ar"), 24),
         "location": {"country_iso3": iso, "label_ar": country_ar, "region_ar": _clean(loc.get("region_ar"), 30),
-                     "point": {"lon": lon, "lat": lat, "label_ar": place or country_ar}},
+                     "point": {"lon": lon, "lat": lat, "label_ar": place or country_ar}, "map": map_view(iso, lon, lat)},
         "where_line": _clean(d.get("where_line"), 80),
         "lower_third": {"name_ar": _clean((d.get("lower_third") or {}).get("name_ar") or place, 38),
                         "role_ar": _clean((d.get("lower_third") or {}).get("role_ar"), 56), "source": (primary or [A.GENERIC])[0]},
@@ -252,6 +272,9 @@ def build_story(d, items, src_text, sid, outlets):
     hits = banned_hits(vis + " " + " ".join(S["footage_queries"] + S["place_terms_en"]))
     if hits:
         raise StoryError(f"banned: {hits}")
+    vh = safety.output_hits(vis + " " + " ".join(S["footage_queries"]))
+    if vh:                                     # no war / violence on screen or in the caption (user hard rule)
+        raise StoryError(f"violence/war terms: {vh[:5]}")
     # ---- attribution hard gate: no competing outlet on screen; attributions in the text must be in the sources
     vis_all = json.dumps({k: v for k, v in S.items() if k not in ("id", "media", "footage_queries", "place_terms_en")}, ensure_ascii=False)
     oh = A.outlet_hits(vis_all)
@@ -281,19 +304,134 @@ def fact_check(llm, S, src):
     return bool(d.get("ok")), [str(p)[:160] for p in (d.get("problems") or [])][:6]
 
 
+# on-screen length limits enforced by build_story (characters without [[ ]]); the writer is asked for a few less
+LIMITS = [("topic_ar", 24), ("headline", 50), ("headline_breaking", 50), ("deck", 64), ("visual_caption", 56),
+          ("where_line", 80), ("lower_third.name_ar", 38), ("lower_third.role_ar", 56), ("facts.*.text", 64),
+          ("next.lines.*", 60), ("breaking_lines.*.text", 60), ("ticker.*", 90), ("counter.prefix_ar", 14),
+          ("counter.label_ar", 40), ("counter.sub_ar", 50), ("location.place_ar", 30), ("location.region_ar", 30)]
+DROPPABLE = ("visual_caption", "ticker")       # decorative lines: dropped (replaced by verified lines) rather than failing
+
+
+def _slots(d):
+    """(getter, setter, text, limit, key) for every limited string field present in the LLM JSON."""
+    out = []
+
+    def walk(obj, parts, key, limit):
+        if not parts:
+            return
+        p, rest = parts[0], parts[1:]
+        if p == "*":
+            if isinstance(obj, list):
+                for i in range(len(obj)):
+                    if rest:
+                        walk(obj[i], rest, key, limit)
+                    elif isinstance(obj[i], str):
+                        out.append((obj, i, key, limit))
+            return
+        if not isinstance(obj, dict) or p not in obj:
+            return
+        if rest:
+            walk(obj[p], rest, key, limit)
+        elif isinstance(obj[p], str):
+            out.append((obj, p, key, limit))
+
+    for key, limit in LIMITS:
+        walk(d, key.split("."), key, limit)
+    return out
+
+
+def _plain_len(t):
+    return len(str(t).replace("[[", "").replace("]]", "").strip())
+
+
+SHORTEN = """اختصر كل سطر من الأسطر التالية إلى الحد الأقصى المذكور من الحروف (بدون احتساب [[ ]]) مع الحفاظ على المعنى نفسه
+والأرقام نفسها حرفياً، دون إضافة أي معلومة جديدة، وبالعربية الفصحى المبسطة. احتفظ بعلامتي [[ ]] حول الكلمة المفتاحية إن وُجدت.
+أعد JSON فقط: {"lines": ["السطر 1 بعد الاختصار", "..."]} بنفس الترتيب والعدد.
+
+"""
+
+
+def shorten_fields(llm, d, log=print, rounds=2):
+    """Shorten-and-retry: overlong on-screen lines are shortened by the LLM (same facts, same numbers) instead of rejecting
+    the whole story. Decorative lines still too long afterwards are dropped; anything else is left for build_story."""
+    for r in range(rounds):
+        over = [x for x in _slots(d) if _plain_len(x[0][x[1]]) > x[3]]
+        if not over:
+            return d
+        req = "\n".join(f"{n + 1}. (حتى {lim - 4} حرفاً) {obj[k]}" for n, (obj, k, _key, lim) in enumerate(over))
+        try:
+            raw = llm(SHORTEN + req, temperature=0.2)
+            lines = json.loads(raw[raw.find("{"): raw.rfind("}") + 1]).get("lines") or []
+        except Exception as ex:
+            log(json.dumps({"shorten_error": str(ex)[:160]}, ensure_ascii=False))
+            break
+        for (obj, k, key, lim), new in zip(over, lines):
+            if isinstance(new, str) and new.strip() and _plain_len(new) < _plain_len(obj[k]):
+                old_nums = sorted(numbers_in(obj[k]))
+                if sorted(numbers_in(new)) == old_nums or set(numbers_in(new)) <= set(old_nums):
+                    obj[k] = new.strip()
+        log(json.dumps({"shortened": [key for (_o, _k, key, _l) in over], "round": r}, ensure_ascii=False))
+    for obj, k, key, lim in _slots(d):                          # decorative lines that are still too long: drop
+        if _plain_len(obj[k]) > lim and key.split(".")[0] in DROPPABLE:
+            if isinstance(obj, list):
+                obj[k] = ""
+            else:
+                obj[k] = ""
+    if isinstance(d.get("ticker"), list):
+        d["ticker"] = [t for t in d["ticker"] if t]
+    return d
+
+
+def _mentions(problem, line):
+    """Does a fact-check problem string refer to this on-screen line?"""
+    pl = re.sub(r"[\[\]]", "", str(line or "")).strip()
+    if len(pl) < 6:
+        return False
+    head = pl[:18]
+    pw = set(re.findall(r"[\w]{3,}", pl))
+    qw = set(re.findall(r"[\w]{3,}", str(problem)))
+    return head in str(problem) or (pw and len(pw & qw) / len(pw) >= 0.6)
+
+
+def drop_unverifiable_captions(S, problems, log=print):
+    """If every fact-check problem concerns a decorative line (image caption, ticker), drop those lines (the caption falls
+    back to the verified deck, the ticker to the verified facts) instead of failing the reel. Returns True if handled."""
+    if not problems:
+        return False
+    hit_caption = [p for p in problems if _mentions(p, S.get("visual_caption"))]
+    hit_ticker = {i for i, t in enumerate(S.get("ticker") or []) for p in problems if _mentions(p, t)}
+    others = [p for p in problems if p not in hit_caption and not any(_mentions(p, t) for t in S.get("ticker") or [])]
+    if others or not (hit_caption or hit_ticker):
+        return False
+    if hit_caption:
+        S["visual_caption"] = ""                   # the renderer then shows the (verified) deck in that slot
+    if hit_ticker:
+        keep = [t for i, t in enumerate(S["ticker"]) if i not in hit_ticker]
+        S["ticker"] = keep or [f["text"].replace("[[", "").replace("]]", "") for f in S["facts"]]
+    log(json.dumps({"dropped_unverifiable": {"visual_caption": bool(hit_caption), "ticker": sorted(hit_ticker)},
+                    "problems": problems[:4]}, ensure_ascii=False))
+    return True
+
+
 def write_story(llm, items, outlets, sid, fetch_articles=True, log=print, hint=None, src=None):
     """Run the LLM (one retry with the validator's complaint) and return (story, source_text).
-    hint: complaint from a previous rejected story (e.g. unsupported claims) to correct on the first attempt."""
+    hint: complaint from a previous rejected story (e.g. unsupported claims) to correct on the first attempt.
+    Overlong lines are shortened (shorten_fields) and unverifiable decorative captions dropped before a rewrite is asked."""
     src = src or source_block(items, fetch_articles)
     err = hint
-    for attempt in range(2):
+    for attempt in range(3):
         prompt = PROMPT + src + (f"\n\nملاحظة: المحاولة السابقة رُفضت لهذا السبب: {err}. صحّح ذلك." if err else "")
         raw = llm(prompt)
         raw = raw[raw.find("{"): raw.rfind("}") + 1]
         try:
             d = json.loads(raw)
+            if not d.get("safe", False):
+                raise StoryError("llm marked unsafe")
+            d = shorten_fields(llm, d, log=log)
             S = build_story(d, items, src, sid, outlets)
             ok, problems = fact_check(llm, S, src)
+            if not ok and drop_unverifiable_captions(S, problems, log=log):
+                ok, problems = fact_check(llm, S, src)              # re-check what is left (fail closed)
             if not ok:
                 raise StoryError("fact-check: " + " | ".join(problems))
             S["source_texts"] = src[:12000]
@@ -302,4 +440,6 @@ def write_story(llm, items, outlets, sid, fetch_articles=True, log=print, hint=N
         except (StoryError, ValueError) as ex:
             err = str(ex)[:200]
             log(json.dumps({"story_reject": err, "attempt": attempt}, ensure_ascii=False))
+            if "llm marked unsafe" in err or "violence/war" in err or "banned" in err:
+                break                                              # never rewrite an unsafe story into a safe-looking one
     raise StoryError(err or "story failed")
