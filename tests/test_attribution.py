@@ -87,6 +87,13 @@ def test_invented_attribution_flagged():
     assert not A.unsupported_attributions("وقال إن البحث مستمر بحسب تقارير", SRC)
 
 
+def test_mentioned_is_not_attributed():
+    src = "تبحث إيرباص عن شركاء جدد. وتشير المعطيات إلى أن الدول الثلاث رصدت أكثر من 5,5 مليار دولار."
+    assert not A.supported("إيرباص", src)
+    assert A.unsupported_attributions("قالت إيرباص إن الدول رصدت 5,5 مليار دولار", src)
+    assert A.supported("إيرباص", src + " وقالت إيرباص في بيان إنها منفتحة على التعاون.")
+
+
 def test_numbers_need_in_text_attribution():
     assert A.lacks_attribution("توفي 12 شخصاً في الفيضانات\n#إسبانيا\nالمصدر: وكالات")
     assert not A.lacks_attribution("توفي 12 شخصاً في الفيضانات، وفق وزارة الصحة\nالمصدر: وزارة الصحة")

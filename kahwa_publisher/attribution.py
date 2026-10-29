@@ -195,10 +195,31 @@ def _toks(t):
 STOP_TOKENS = {_stem(w) for w in ("في", "من", "على", "عن", "إلى", "الى", "و", "يوم", "اليوم", "أمس", "امس", "مساء", "صباح")}
 
 
+_SRC_ATTR = re.compile(rf"(?<![{_AR}])(?:[وفلب]|ال)?(?:قال|قالت|اعلن|اعلنت|ذكر|ذكرت|افاد|افادت|اكد|اكدت|وفق|وفقا|بحسب|حسب|"
+                       rf"بيان|بيانا|صرح|صرحت|تصريح|تصريحات|اوضح|اوضحت|نقلت|كشف|كشفت|اشار|اشارت|نفي|نفت|اتهم|اتهمت|حذر|"
+                       rf"حذرت|دعا|دعت|قدر|قدرت|تقديرات|تقديرات|اعتبر|اعتبرت|متحدث|متحدثه|ناطق|يقول|تقول|اضاف|اضافت|"
+                       rf"اعلان|افصح|افصحت|رجح|رجحت|توقع|توقعت|طالب|طالبت)(?![{_AR}])")
+
+
+def attributed_in(name, sources_text, window=80):
+    """Do the sources attribute something TO this entity (an attribution verb / «وفق» / «بيان» within ~80 characters of
+    its name)? Merely mentioning a company or ministry is not enough to credit it as the source of a fact."""
+    t = _n(sources_text)
+    toks = [w for w in re.sub(r"[^\w\s]", " ", _n(name)).split() if len(w) > 2]
+    if not toks:
+        return False
+    anchor = _stem(max(toks, key=len))
+    for m in re.finditer(r"[\w]+", t):
+        if _stem(m.group(0)) == anchor or anchor in m.group(0):
+            if _SRC_ATTR.search(t[max(0, m.start() - window): m.end() + window]):
+                return True
+    return False
+
+
 def supported(name, sources_text):
     """Does the source text support naming `name` as a source? Wire: any alias of that agency is in the sources.
     Official/other: >=75% of its tokens (clitics + adjective endings stripped) occur in the sources, and at least
-    one distinctive token. Generic («وكالات», «تقارير») needs no support. Outlets are never supported."""
+    one distinctive token, and the sources attribute something to it (attributed_in). Generic («وكالات», «تقارير») needs no support. Outlets are never supported."""
     c = classify(name)
     if c == "outlet":
         return False
@@ -211,7 +232,7 @@ def supported(name, sources_text):
         return False
     src = set(_toks(sources_text))
     hit = sum(w in src for w in toks)
-    return hit / len(toks) >= 0.75 and hit >= 1
+    return hit / len(toks) >= 0.75 and hit >= 1 and attributed_in(name, sources_text)
 
 
 def rank(names, sources_text, limit=3):
