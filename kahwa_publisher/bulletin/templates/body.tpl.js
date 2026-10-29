@@ -387,8 +387,10 @@
       inkVis(sc, true);
       tab(sc, s.tab, t);
       let tt = t + 0.3;
+      // rows flow in a column (a brief may take two lines); long briefs switch every row to the smaller size (.lsm)
+      const lst = el("div", "lrows" + (s.xsmall ? " lsm lxs" : s.small ? " lsm" : ""), sc);
       s.rows.forEach((row, i) => {
-        const rw = el("div", "lrow2", sc, null, { top: 420 + i * 250 + "px" });
+        const rw = el("div", "lrow2", lst);
         el("div", "li", rw, String(i + 1));
         const tx = el("div", "ltx", rw); const rr = rich(tx, row.t);
         el("div", "ls2", rw, "المصدر: " + esc(row.s));
@@ -400,19 +402,21 @@
     } else if (s.type === "end") {
       const sc = scene(s.id, 9);
       el("div", "full", sc, null, { background: "var(--ink)" }); el("div", "glow", sc); el("div", "grain", sc);
-      const lg = el("div", "logo", sc, null, { top: "430px" }); const k = el("img", "", lg); k.src = "logo-kahwa.svg"; const b = el("img", "", lg); b.src = "logo-band.svg";
+      const lg = el("div", "logo", sc, null, { top: "500px" }); const k = el("img", "", lg); k.src = "logo-kahwa.svg"; const b = el("img", "", lg); b.src = "logo-band.svg";
       tl.fromTo(k, { clipPath: "inset(0 0 0 100%)" }, { clipPath: "inset(0 0 0 0%)", duration: 0.45, ease: E.enter, immediateRender: true }, t + 0.1);
       tl.fromTo(b, { clipPath: "inset(0 0 0 100%)" }, { clipPath: "inset(0 0 0 0%)", duration: 0.45, ease: E.enter, immediateRender: true }, t + 0.22);
-      const l1 = el("div", "endline", sc, esc(s.l1), { top: "700px", fontSize: "60px", fontWeight: 800 });
+      // owner 2026-10-29: title + rule + credits only (no «غدًا» line, no two-source line); block re-centred so the card is not empty
+      const l1 = el("div", "endline", sc, esc(s.l1), { top: "770px", fontSize: "66px", fontWeight: 800 });
       tl.fromTo(l1, { y: 24, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.4, ease: E.enter, immediateRender: true }, t + 0.5);
-      const rule = el("div", "abs", sc, null, { left: "390px", width: "300px", top: "800px", height: "5px", background: "var(--red)", transformOrigin: "50% 50%" });
+      const rule = el("div", "abs", sc, null, { left: "390px", width: "300px", top: "880px", height: "6px", background: "var(--red)", transformOrigin: "50% 50%" });
       tl.fromTo(rule, { scaleX: 0 }, { scaleX: 1, duration: 0.45, ease: E.enter, immediateRender: true }, t + 0.6);
-      const l2 = el("div", "endline", sc, esc(s.l2), { top: "840px", fontSize: "48px", fontWeight: 700 });
-      tl.fromTo(l2, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4, immediateRender: true }, t + 0.9);
-      const l3 = el("div", "endline", sc, `<span class="chk" data-nc="1">✓</span> ${esc(s.l3)}`, { top: "940px", fontSize: "38px", fontWeight: 700, color: "#C9D0DC" });
-      tl.fromTo(l3, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4, immediateRender: true }, t + 1.3);
-      const cr = el("div", "endline credits", sc, s.credits.split("<br>").map(bidi).join("<br>"), { top: "1060px" });
-      tl.fromTo(cr, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4, immediateRender: true }, t + 1.6);
+      let ey = 920;
+      if (s.l2) { const l2 = el("div", "endline", sc, esc(s.l2), { top: ey + "px", fontSize: "48px", fontWeight: 700 }); ey += 100;
+        tl.fromTo(l2, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4, immediateRender: true }, t + 0.9); }
+      if (s.l3) { const l3 = el("div", "endline", sc, esc(s.l3), { top: ey + "px", fontSize: "38px", fontWeight: 700, color: "#C9D0DC" }); ey += 100;
+        tl.fromTo(l3, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4, immediateRender: true }, t + 1.3); }
+      const cr = el("div", "endline credits", sc, s.credits.split("<br>").map(bidi).join("<br>"), { top: ey + 30 + "px" });
+      tl.fromTo(cr, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4, immediateRender: true }, t + 1.1);
       tl.to(sc, { autoAlpha: 0, duration: 0.5, ease: "none" }, t + d - 0.5);
     }
   });

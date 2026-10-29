@@ -33,8 +33,11 @@ SEG_PROMPT = """أنت محرر أول في نشرة أخبار تلفزيوني
 - ممنوع ذكر أي قناة أو موقع إخباري أو صحيفة في أي حقل. "sources" = الجهات الأصلية التي تقول المصادر صراحة إنها أعلنت المعلومة
   (جهة رسمية أولاً، ثم وكالة أنباء: رويترز، أسوشيتد برس، الوكالة الفرنسية…) وإلا قائمة فارغة. المصادر مرقمة [م1] [م2] فقط.
 - ضع الكلمة الأهم (كلمة إلى ثلاث) بين [[ ]] مرة واحدة على الأكثر في كل سطر.
+- كل سطر على الشاشة يجب أن يُفهم وحده: مشاهد يرى السطر منفرداً يعرف مَن وأين وماذا. اذكر الفاعل المسمّى أو المكان/البلد صراحة في
+  headline و brief (مثال صحيح: «منفذ هجوم تراب في فرنسا يقر بالتخطيط المسبق»، خطأ: «المشتبه به أقر بالتخطيط المسبق للهجوم»).
+  لا تبدأ سطراً بـ«المشتبه به» أو «الحادث» أو «الهجوم» أو «الضحايا» أو «السلطات» دون أن تحدد مباشرة أي هجوم/حادث وأين.
 - الأطوال إلزامية (تُعدّ الحروف بدون [[ ]]): title حتى 16 (كلمتان أو ثلاث)، tag حتى 12، headline حتى 52، strap حتى 58، map_line حتى 58،
-  number.label حتى 30، number.deck حتى 52، quote.text حتى 52، quote.who حتى 24، quote.role حتى 30، كل سطر في next.rows حتى 50، brief حتى 44.
+  number.label حتى 30، number.deck حتى 52، quote.text حتى 52، quote.who حتى 24، quote.role حتى 30، كل سطر في next.rows حتى 50، brief حتى 64 (جملة كاملة في سطرين على الأكثر).
 - place: المكان الرئيسي للخبر (مدينة أو منطقة) بإحداثيات دقيقة داخل البلد، أو null إن لم يكن للخبر مكان واحد واضح.
   label اسم المكان بالعربية حتى 20 حرفاً.
 - number: أهم رقم في المصادر (num بالأرقام كما ورد) أو null. quote: تصريح منقول حرفياً تقريباً من المصادر مع قائله أو null.
@@ -47,17 +50,21 @@ SEG_PROMPT = """أنت محرر أول في نشرة أخبار تلفزيوني
  "number": {"num": "...", "label": "ماذا يعني الرقم", "deck": "سطر توضيحي مع [[...]]"},
  "quote": {"text": "...", "who": "...", "role": "..."},
  "next": {"title": "ماذا [[بعد؟]]", "rows": ["...", "..."]},
- "brief": "الخبر في سطر قصير مع [[...]]", "sources": ["..."], "urgent": false, "safe": true}
+ "brief": "الخبر في جملة كاملة قصيرة تذكر مَن/أين مع [[...]]", "actor": "الفاعل الرئيسي المسمّى في المصادر (شخص أو جهة أو بلد) أو null",
+ "sources": ["..."], "urgent": false, "safe": true}
 اجعل "safe" = false إذا كان الخبر رياضياً أو لا يُروى دون الدول الممنوعة أو بلا تفاصيل دموية أو كان دعاية أو لا يمكن التحقق منه.
 
 المصادر:
 """
 
-BRIEF_PROMPT = """أنت محرر نشرة أخبار. اكتب الخبر التالي في سطر واحد على الشاشة حتى 44 حرفاً بالعربية الفصحى، مع الكلمة الأهم بين [[ ]]،
+BRIEF_PROMPT = """أنت محرر نشرة أخبار. اكتب الخبر التالي في جملة كاملة على الشاشة حتى 64 حرفاً (سطران على الأكثر) بالعربية الفصحى، مع الكلمة الأهم بين [[ ]]،
 اعتماداً فقط على المصادر: كل رقم موجود حرفياً فيها، بلا رأي ولا تفاصيل دموية، ممنوع ذكر المغرب أو الإمارات أو الجزائر أو إسرائيل،
 وممنوع ذكر أي قناة أو موقع إخباري. "source" = الجهة الأصلية التي تقول المصادر إنها أعلنت الخبر (رسمية أو وكالة أنباء) أو "".
-للعنوان القصير (headline) حتى 52 حرفاً مع [[...]]، و place كما في الخبر أو null.
-أعد JSON فقط: {"brief": "...", "headline": "...", "source": "...", "place": {"iso3": "ISO3", "lon": 0.0, "lat": 0.0, "label": "..."}, "urgent": false, "safe": true}
+للعنوان القصير (headline) حتى 52 حرفاً مع [[...]]، و place كما في الخبر أو null. "actor" = الفاعل الرئيسي المسمّى في المصادر أو null.
+- كل سطر على الشاشة يجب أن يُفهم وحده: مشاهد يرى السطر منفرداً يعرف مَن وأين وماذا. اذكر الفاعل المسمّى أو المكان/البلد صراحة في
+  headline و brief (مثال صحيح: «منفذ هجوم تراب في فرنسا يقر بالتخطيط المسبق»، خطأ: «المشتبه به أقر بالتخطيط المسبق للهجوم»).
+  لا تبدأ سطراً بـ«المشتبه به» أو «الحادث» أو «الهجوم» أو «الضحايا» أو «السلطات» دون أن تحدد مباشرة أي هجوم/حادث وأين.
+أعد JSON فقط: {"brief": "...", "headline": "...", "source": "...", "actor": "...", "place": {"iso3": "ISO3", "lon": 0.0, "lat": 0.0, "label": "..."}, "urgent": false, "safe": true}
 
 المصادر:
 """
@@ -68,7 +75,8 @@ R.register(BRIEF_PROMPT, {"brief": str})
 # title: the prompt asks for <= 16; 26 is the hard cap (bumper + rail shrink long titles to one line). Titles are never trimmed:
 # a word-boundary cut broke «الولايات المتحدة» (run 40960800162), and 22 dropped a whole story on 23 chars (run 40953097998).
 LIM = {"title": 26, "tag": 12, "headline": 52, "strap": 58, "map_line": 58, "label": 30, "deck": 52, "qtext": 52, "who": 24,
-       "role": 30, "row": 50, "brief": 44, "place_label": 20}
+       "role": 30, "row": 50, "brief": RD.BRIEF_MAX_CHARS, "place_label": 20}
+# brief: 44 dropped complete sentences (owner 2026-10-29); now up to 2 lines, the list shrinks its font for long rows.
 
 
 def plen(s):
@@ -120,7 +128,7 @@ def select_clusters(n=9, min_sources=2):
         if any((k in text) if " " in k else (N.norm(k) in words) for k in N.SPORTS):
             continue
         cands.append(c)
-        if len(cands) >= 12:
+        if len(cands) >= max(12, n + 3):
             break
     allowed = safety.classify(R.bound("classifier"), cands) if cands else {}
     out = [c for c in cands if allowed.get(c["key"])][:n]
@@ -274,6 +282,123 @@ def verify_lines(checker, lines, src_text):
     return claims, bad
 
 
+# ------------------------------------------------------------------ self-contained lines (owner 2026-10-29)
+# «المشتبه به أقر بالتخطيط المسبق للهجوم» on «باختصار»: who? which attack? where? Every headline / brief must name the story's
+# place/country or its named actor; a vague opener must be qualified at once.
+VAGUE_OPENERS = ("المشتبه به", "المشتبه بهم", "المشتبه", "المتهم", "المتهمون", "الحادث", "الحادثة", "الهجوم", "الضحايا", "الضحية",
+                 "القتلى", "السلطات", "الانفجار", "الضربة", "الجاني", "المنفذ", "الحكومة", "الرئيس", "الشرطة", "الجيش", "الوزير",
+                 "المحكمة", "العملية", "الاتفاق", "القرار", "التحقيق", "المسؤولون", "الطرفان")
+_GENERIC_ANCHOR = {"مدينه", "محافظه", "منطقه", "ولايه", "اقليم", "شمال", "جنوب", "شرق", "غرب", "وسط", "ساحل", "وزاره", "وزير", "رئيس",
+                   "الرئيس", "حكومه", "الحكومه", "هيئه", "مكتب", "مجلس", "وكاله", "قوات", "جيش", "شرطه", "السلطات", "جهاز", "النيابه",
+                   "الوطنيه", "العامه", "المحليه", "الدوليه", "الامم", "المتحده", "قرب", "بلده", "مطار", "ميناء", "جزيره"}
+
+
+def _core(w):
+    from ..newsroom import norm
+    w = norm(w).strip()
+    if w.startswith("ال") and len(w) > 4:
+        w = w[2:]
+    for suf in ("يه", "يا", "ه", "ا"):
+        if w.endswith(suf) and len(w) - len(suf) >= 3:
+            w = w[: -len(suf)]
+            break
+    return w
+
+
+def anchors_for(place=None, actor=None, who=None, src_text=""):
+    """Words that tell a viewer who/where: place label, the place's country (Arabic name from the map data), the named actor
+    (only when it is in the sources), a quoted speaker. -> set of normalised cores (>= 3 chars, generic words out)."""
+    from ..newsroom import norm
+    names = []
+    if place:
+        names.append(place.get("label") or "")
+        iso = place.get("iso3") or (place.get("iso") if isinstance(place, dict) else None)
+        f = RD._feat(iso) if iso else None
+        if f and RD.geo.label_of(f):
+            names.append(RD.geo.label_of(f))
+    nsrc = norm(src_text or "")
+    for a in (actor, who):
+        if isinstance(a, str) and a.strip() and (not src_text or all(_core(w) in nsrc for w in a.split()
+                                                                         if len(_core(w)) >= 3 and norm(w).strip() not in _GENERIC_ANCHOR)):
+            names.append(a)
+    out = set()
+    for n in names:
+        for w in re.split(r"[\s·،,/-]+", n or ""):
+            c = _core(w)
+            if len(c) >= 3 and norm(w).strip() not in _GENERIC_ANCHOR and c not in _GENERIC_ANCHOR:
+                out.add(c)
+    return out
+
+
+def _has_anchor(text, anchors):
+    from ..newsroom import norm
+    t = norm(re.sub(r"\[\[|\]\]", "", text or ""))
+    return any(a in t for a in anchors)
+
+
+def vague_opener(line, anchors):
+    """The vague opener a line starts with when it is not qualified (no place/actor within the next 4 words), else None."""
+    t = re.sub(r"\[\[|\]\]", "", line or "").strip(" «»\"'.:،-–")
+    t = re.sub(r"^و(?=ال)", "", t)
+    for v in sorted(VAGUE_OPENERS, key=len, reverse=True):
+        if t == v or t.startswith(v + " "):
+            head = " ".join(t.split()[: len(v.split()) + 4])
+            return None if _has_anchor(head, anchors) else v
+    return None
+
+
+def self_contained_problems(lines, anchors, need_anchor=("headline", "brief")):
+    """Deterministic gate. lines = [(kind, text)]. Headline + brief must carry an anchor; title/headline/brief must not open
+    vaguely. No anchors known at all -> the brief/headline cannot be shown (fail closed)."""
+    p = []
+    for kind, txt in lines:
+        if not (txt or "").strip():
+            continue
+        plain = txt.replace("[[", "").replace("]]", "")
+        if kind in need_anchor and not anchors:
+            p.append(f"{kind}: story has no named place or actor to anchor the line: {plain[:60]}")
+        elif kind in need_anchor and not _has_anchor(txt, anchors):
+            p.append(f"{kind} not self-contained (name who/where): {plain[:60]}")
+        if kind in ("headline", "brief", "title"):
+            v = vague_opener(txt, anchors)
+            if v:
+                p.append(f"{kind} opens with «{v}» without saying which/where: {plain[:60]}")
+    return p
+
+
+STANDALONE_PROMPT = """أنت مدقق تحرير في نشرة أخبار مرئية بلا صوت. السطور التالية تظهر على الشاشة. لكل سطر احكم: هل يفهمه مشاهد يراه وحده
+(أو داخل فقرته إن ذُكرت الفقرة) فيعرف مَن الفاعل وما الحدث وأين، دون أن يحتاج إلى سطر آخر؟ سطر يبدأ بـ«المشتبه به» أو «الهجوم» أو
+«الحادث» دون تحديد أي هجوم وأين = غير مفهوم. عنوان الفقرة القصير (2-3 كلمات) مقبول إن حدّد الخبر. لا تحكم على الصحة، فقط على الوضوح.
+أعد JSON فقط: {"results": [{"i": 1, "ok": true, "why": "سبب قصير إن كان غير مفهوم"}]}
+
+السطور:
+"""
+R.register(STANDALONE_PROMPT, {"results": list})
+
+
+def standalone_check(checker, items):
+    """Different-family LLM: is each line understandable on its own? items = [(kind, text, context or "")].
+    Returns [(index, kind, text, why)] of lines judged not self-contained. Fail closed: unparseable / missing verdict = bad."""
+    if not items:
+        return []
+    body = "\n".join(f"{i + 1}. [{k}] {t.replace('[[', '').replace(']]', '')}" + (f"   (داخل فقرة «{ctx}»)" if ctx else "")
+                     for i, (k, t, ctx) in enumerate(items))
+    obj = _json(checker(STANDALONE_PROMPT + body, temperature=0.0))
+    res = {}
+    for r in obj.get("results") or []:
+        if isinstance(r, dict):
+            try:
+                res[int(r.get("i"))] = r
+            except (TypeError, ValueError):
+                pass
+    bad = []
+    for i, (k, t, _) in enumerate(items):
+        r = res.get(i + 1)
+        if r is None or r.get("ok") is not True:
+            bad.append((i, k, t, (r or {}).get("why") or "no verdict"))
+    return bad
+
+
 def write_segment(writer, checker, c, key, fetch_articles=True, brief_only=False):
     """One story -> (seg or None, brief dict, meta). Fail closed: any failure after one rewrite -> None."""
     src = source_block(c["items"], fetch_articles=fetch_articles)
@@ -294,14 +419,33 @@ def write_segment(writer, checker, c, key, fetch_articles=True, brief_only=False
                 lines = [d["brief"], d["headline"]] + ([place["label"]] if place and place["label"] else [])
                 brief = {"t": d["brief"].strip(), "s": srcs[0] if srcs else A.GENERIC}
                 extra = {"headline": d["headline"].strip(), "place": place, "urgent": bool(d.get("urgent"))}
+                anchors = anchors_for(place, d.get("actor"), src_text=src)
+                sc_lines = [("brief", brief["t"]), ("headline", extra["headline"])]
+                sa_items = [("brief", brief["t"], "")]
             else:
                 seg, b, s0 = seg_from(d, key, src)
                 lines = seg_lines(seg, b)
                 brief = {"t": b, "s": s0}
-                extra = {"urgent": bool(d.get("urgent")), "place": (seg.get("map") or {}).get("point")}
-            probs = screen_problems(lines, src)
+                pt = (seg.get("map") or {}).get("point")
+                extra = {"urgent": bool(d.get("urgent")), "place": dict(pt, iso3=seg["map"]["iso3"]) if pt else None}
+                q = d.get("quote") if isinstance(d.get("quote"), dict) else {}
+                anchors = anchors_for(extra["place"] or (valid_place(d["place"]) if isinstance(d.get("place"), dict) else None),
+                                      d.get("actor"), q.get("who"), src_text=src)
+                sc_lines = [("title", seg["title"]), ("headline", seg["headline"]), ("brief", b)]
+                sa_items = [("title", seg["title"], ""), ("headline", seg["headline"], ""), ("brief", b, "")] + \
+                           [(sh["type"], sh["text"], seg["title"]) for sh in seg["shots"] if sh["type"] in ("strap", "map")]
+            probs = screen_problems(lines, src) + self_contained_problems(sc_lines, anchors)
             if probs:
                 raise ValueError("; ".join(probs[:4]))
+            unclear = standalone_check(checker, sa_items)
+            if unclear and seg is not None and all(k == "map" for _, k, _, _ in unclear):
+                seg = dict(seg, shots=[sh for sh in seg["shots"] if sh["type"] != "map"])   # optional «أين» line: drop it
+                lines = seg_lines(seg, brief["t"])
+                log({"bulletin_unclear_map_line_dropped": c["items"][0]["title"][:70]})
+                unclear = [] if len(seg["shots"]) >= 2 else unclear
+            if unclear:
+                raise ValueError("not understandable on its own (name who/where/what): " +
+                                 " | ".join(f"{k}: «{t.replace('[[', '').replace(']]', '')[:50]}» ({w[:60]})" for _, k, t, w in unclear[:4]))
             claims, bad = verify_lines(checker, lines, src)
             if bad and seg is not None:
                 pr = prune(seg, brief["t"], bad)
@@ -340,13 +484,20 @@ def _dup_segment(seg, segs, km=25.0):
     return False
 
 
+def _cluster_sim(a, b, min_inter=3, ratio=0.22):
+    """Same story in two clusters (newsroom.cluster rule, on the clusters' token sets)."""
+    ta, tb = a.get("tok") or set(), b.get("tok") or set()
+    inter = len(ta & tb)
+    return inter >= min_inter and inter / max(1, min(len(ta), len(tb))) >= ratio
+
+
 def build_spec(date, asof, n_main=5, n_brief=3, fetch_articles=True, mode="bulletin"):
     """Pick, write and verify the day's stories. Returns (spec, report). Raises RundownError when too few stories verify."""
     writer = R.bound("writer")
     checker = R.bound("factcheck", exclude_from=writer)
     want_main = n_main if mode == "bulletin" else 3
-    clusters = select_clusters(n=want_main + n_brief + 3)
-    segs, briefs, rep, pings, used, main_briefs = [], [], [], [], set(), []
+    clusters = select_clusters(n=want_main + n_brief + 6)
+    segs, briefs, rep, pings, used, seg_clusters, unusable = [], [], [], [], set(), [], set()
     for c in clusters:
         if len(segs) >= want_main:
             break
@@ -367,24 +518,45 @@ def build_spec(date, asof, n_main=5, n_brief=3, fetch_articles=True, mode="bulle
             seg = None
         rep.append({"title": c["items"][0]["title"][:90], "ok": bool(seg), **{k: v for k, v in meta.items() if k != "place"}})
         used.add(c["key"])
+        if not seg and re.search(r"duplicate|unsafe", str(meta.get("error") or "")):
+            unusable.add(c["key"])
         if seg:
+            seg = dict(seg, cluster=c["key"], brief_t=br["t"])
             segs.append(seg)
-            main_briefs.append(br)
+            seg_clusters.append(c)
             pl = meta.get("place")
             if pl:
                 pings.append([pl["lon"], pl["lat"]])
     if mode == "bulletin":
+        # «باختصار» = OTHER stories, never a repeat/update of a segment (owner 2026-10-29: the Trappes confession came back as
+        # brief 1). Candidates: clusters not used as a segment (a story that failed as a full segment may still be a short item),
+        # not token-similar to a segment's cluster, and after writing not overlapping a segment or another brief (RD.brief_overlap).
+        seg_keys = {g["cluster"] for g in segs}
         for c in clusters:
             if len(briefs) >= n_brief:
                 break
-            if c["key"] in used:
+            if c["key"] in seg_keys or c["key"] in unusable:
+                continue
+            sim = next((g for g in seg_clusters if _cluster_sim(c, g)), None)
+            if sim is not None:
+                log({"brief_candidate_same_story": c["items"][0]["title"][:70], "as": sim["items"][0]["title"][:70]})
                 continue
             _, br, meta = write_segment(writer, checker, c, "b", fetch_articles, brief_only=True)
-            rep.append({"title": c["items"][0]["title"][:90], "ok": bool(br), "brief": True, **{k: v for k, v in meta.items() if k != "place"}})
+            why = None
             if br:
+                br = dict(br, cluster=c["key"], place=meta.get("place"))
+                why = next((f"{g['key']}: {w}" for g in segs if (w := RD.brief_overlap(br, g))), None) or \
+                    next((f"brief: {w}" for o in briefs if (w := RD.brief_overlap(br, {"title": o["t"], "map": (
+                        {"iso3": o["place"]["iso3"], "point": o["place"]} if o.get("place") else None)}))), None)
+                if why:
+                    log({"brief_overlaps": br["t"], "why": why})
+            rep.append({"title": c["items"][0]["title"][:90], "ok": bool(br) and not why, "brief": True,
+                        **({"error": "overlaps " + why} if why else {}), **{k: v for k, v in meta.items() if k != "place"}})
+            if br and not why:
                 briefs.append(br)
-        if not briefs:                 # «باختصار» falls back to the main stories' own verified one-liners
-            briefs = main_briefs[:3]
+        if len(briefs) < RD.MIN_BRIEF:    # never fall back to the segments' own one-liners: no section today
+            log({"brief_section_dropped": len(briefs)})
+            briefs = []
         need = RD.MIN_MAIN
     else:
         need = 2

@@ -283,3 +283,212 @@ def test_duplicate_segments_are_detected():
     c = {"title": "هجوم في [[دنيبرو]]"}
     d = {"title": "ضربة في كييف", "map": {"iso3": "UKR", "point": {"lon": 30.52, "lat": 50.45}}}
     assert W._dup_segment(b, [a]) and W._dup_segment(c, [a]) and not W._dup_segment(d, [a])
+
+
+# ------------------------------------------------------------------ owner 2026-10-29: «باختصار» = other stories, self-contained lines
+def test_brief_gate_rejects_a_segment_story_repeated_in_brief():
+    s = spec()
+    seg = s["segments"][0]                                        # spain: 69 dead, train crash near Toledo
+    s["brief"][0] = {"t": "[[69 قتيلًا]] في اصطدام قطارين قرب طليطلة", "s": "وزارة النقل الإسبانية"}
+    with pytest.raises(RD.RundownError, match="BRIEF CHECK FAILED: brief 1 repeats segment spain"):
+        RD.build(s)
+    s = spec()                                                    # same cluster id, different wording
+    s["segments"][1]["cluster"] = "abc123"
+    s["brief"][1] = dict(s["brief"][1], cluster="abc123")
+    with pytest.raises(RD.RundownError, match="brief 2 repeats segment gulf: same story cluster"):
+        RD.build(s)
+    s = spec()                                                    # same place + shared topic word
+    s["brief"][2] = {"t": "تعليق [[القطارات السريعة]] حتى إشعار آخر", "s": "x",
+                     "place": {"iso3": "ESP", "lon": -3.75, "lat": 39.40, "label": "أوردا"}}
+    with pytest.raises(RD.RundownError, match="brief 3 repeats segment spain"):
+        RD.build(s)
+
+
+def test_brief_gate_from_run_40953097998_spec():
+    """The real failing rundown: all three «باختصار» items were the segments' own one-liners (Trappes, Dnipro, crocodiles)."""
+    s = spec()
+    s["segments"][0] = dict(s["segments"][0], headline="اعترافات [[المشتبه به]] في هجوم تراب العنصري", title="هجوم تراب العنصري")
+    s["brief"][0] = {"t": "المشتبه به أقر بالتخطيط المسبق للهجوم", "s": "النيابة الوطنية لمكافحة الإرهاب"}
+    with pytest.raises(RD.RundownError, match="brief 1 repeats segment spain"):
+        RD.build(s)
+
+
+def test_distinct_briefs_pass_and_duplicates_between_briefs_fail():
+    B = RD.build(spec())
+    assert [r["t"] for r in next(x for x in B["scenes"] if x["type"] == "list")["rows"]] == [r["t"] for r in spec()["brief"]]
+    s = spec()
+    s["brief"][1] = dict(s["brief"][0])
+    with pytest.raises(RD.RundownError, match="same story"):
+        RD.build(s)
+
+
+def test_too_few_briefs_and_section_dropped_gracefully():
+    s = spec()
+    s["brief"] = s["brief"][:1]
+    with pytest.raises(RD.RundownError, match="2-3 items or none"):
+        RD.build(s)
+    s["brief"] = []
+    B = RD.build(s)                                               # no «باختصار»: no bumper, no list, headline gate still holds
+    assert "brief" not in [g["k"] for g in B["segs"]]
+    assert not any(x["type"] == "list" for x in B["scenes"])
+    assert [x["id"] for x in B["scenes"] if x["type"] == "bumper"] == ["b1", "b2", "b3", "b4", "b5"]
+    assert RD.check_headlines(B) == ["spain", "gulf", "eco", "yemen", "clim"]
+
+
+def test_long_brief_two_lines_switches_list_to_small_size():
+    s = spec()
+    s["brief"][0]["t"] = "كوريا الشمالية تطلق نحو [[10 صواريخ]] باليستية باتجاه البحر الشرقي"
+    B = RD.build(s)
+    assert next(x for x in B["scenes"] if x["type"] == "list")["small"] is True
+    s["brief"][0]["t"] = "ب" * (RD.BRIEF_MAX_CHARS + 1)
+    with pytest.raises(RD.RundownError, match="longer than"):
+        RD.build(s)
+    tpl = (ROOT / "kahwa_publisher/bulletin/templates/body.css").read_text()
+    assert ".lrows.lsm .ltx" in tpl
+
+
+FRA = {"iso3": "FRA", "lon": 2.01, "lat": 48.77, "label": "تراب"}
+
+
+@pytest.mark.parametrize("line,ok", [
+    ("المشتبه به أقر بالتخطيط المسبق للهجوم", False),              # owner screenshot 2:17
+    ("الهجوم أوقع إصابات واعتقال شخص", False),
+    ("الحادث: توقيف شخصين بعد إطلاق نار", False),
+    ("منفذ هجوم تراب في فرنسا يقر بالتخطيط المسبق", True),
+    ("المشتبه به في هجوم [[تراب]] يقر بالتخطيط المسبق", True),       # vague opener, qualified at once
+    ("القضاء الفرنسي: منفذ الهجوم يقر بالتخطيط المسبق", True),
+])
+def test_self_contained_gate(line, ok):
+    probs = W.self_contained_problems([("brief", line)], W.anchors_for(FRA))
+    assert (probs == []) is ok, probs
+
+
+def test_vague_opener_rejected_even_with_anchor_late_in_line_and_without_anchors():
+    an = W.anchors_for(FRA)
+    assert W.vague_opener("المشتبه به أقر أمام القضاء بالتخطيط المسبق لما جرى في تراب", an) == "المشتبه به"
+    assert W.vague_opener("والهجوم في تراب يثير جدلاً", an) is None
+    assert W.vague_opener("[[الهجوم]] على محطة قطار", set()) == "الهجوم"
+    assert any("no named place or actor" in p for p in W.self_contained_problems([("brief", "إغلاق طريق رئيسي")], set()))
+    assert any("opens with" in p for p in W.self_contained_problems([("title", "الحادث الأخير")], an))
+
+
+def test_anchors_use_country_name_and_sourced_actor_only():
+    an = W.anchors_for({"iso3": "ESP", "lon": -4.0, "lat": 39.9, "label": "طليطلة"})
+    assert {"طليطل", "اسبان"} <= an
+    assert W._has_anchor("[[69 قتيلًا]] في حادث قطارين بإسبانيا", an)
+    assert W.anchors_for(None, "زيلينسكي", src_text="دعا زيلينسكي أوروبا") == {"زيلينسكي"}
+    assert W.anchors_for(None, "ماكرون", src_text="دعا زيلينسكي أوروبا") == set()   # actor not in the sources: ignored
+
+
+class _Fake:
+    families = set()
+
+    def __init__(self, fn):
+        self.fn = fn
+
+    def __call__(self, prompt, temperature=None, **k):
+        return self.fn(prompt)
+
+
+def test_standalone_checker_fail_closed_and_verdicts():
+    items = [("brief", "المشتبه به أقر بالتخطيط", ""), ("headline", "منفذ هجوم تراب في فرنسا يقر", "")]
+    bad = W.standalone_check(_Fake(lambda p: '{"results": [{"i": 1, "ok": false, "why": "من المشتبه؟"}, {"i": 2, "ok": true}]}'), items)
+    assert [(b[0], b[1]) for b in bad] == [(0, "brief")]
+    assert len(W.standalone_check(_Fake(lambda p: '{"results": [{"i": 2, "ok": true}]}'), items)) == 1     # missing verdict = bad
+    with pytest.raises(ValueError):
+        W.standalone_check(_Fake(lambda p: "not json"), items)
+
+
+def _cl(key, title, toks):
+    return {"key": key, "sources": ["BBC عربي", "فرانس 24"], "tok": set(toks), "items": [{"title": title, "summary": SRC, "link": ""}]}
+
+
+def test_build_spec_briefs_are_other_stories_never_segment_fallback(monkeypatch):
+    """Segments s1-s3 (Spain, Ukraine, Egypt); candidates: a second cluster of the Spain story (token-similar), two other
+    stories. «باختصار» = the two other stories only; with < 2 others the section is dropped (no fallback to segment one-liners)."""
+    seg_json = {
+        "c1": dict(good()),
+        "c2": dict(good(), title="هجوم في دنيبرو", headline="أوكرانيا: [[هجوم روسي]] على محطة قطار في دنيبرو",
+                   strap="[[هجوم روسي]] على محطة قطار في دنيبرو", brief="هجوم روسي على محطة قطار في [[دنيبرو]] الأوكرانية",
+                   place={"iso3": "UKR", "lon": 35.05, "lat": 48.46, "label": "دنيبرو"}, number=None,
+                   quote={"text": "نطلب من أوروبا التحرك", "who": "زيلينسكي", "role": "الرئيس الأوكراني"}),
+        "c3": dict(good(), title="تماسيح مصر", headline="مصر: ضبط [[تماسيح]] صغيرة في قطار بأسيوط", strap="ضبط [[تماسيح]] صغيرة في قطار بأسيوط",
+                   brief="ضبط تماسيح صغيرة في قطار بمصر", place={"iso3": "EGY", "lon": 31.18, "lat": 27.18, "label": "أسيوط"}, number=None,
+                   quote={"text": "ضبطنا التماسيح", "who": "وزارة الداخلية", "role": "مصر"}),
+    }
+    briefs = {"c4": {"brief": "اليابان: [[زلزال]] بقوة 6 درجات قبالة هوكايدو", "headline": "زلزال في اليابان", "source": "",
+                     "place": {"iso3": "JPN", "lon": 142.5, "lat": 43.0, "label": "هوكايدو"}},
+              "c5": {"brief": "البرازيل تعلن [[خطة]] لحماية غابات الأمازون", "headline": "خطة الأمازون", "source": "",
+                     "place": {"iso3": "BRA", "lon": -60.0, "lat": -3.0, "label": "الأمازون"}},
+              "c1b": {"brief": "إسبانيا: [[69 قتيلًا]] في اصطدام قطارين قرب طليطلة", "headline": "x", "source": "",
+                      "place": {"iso3": "ESP", "lon": -4.02, "lat": 39.86, "label": "طليطلة"}}}
+    cl = [_cl("c1", "اصطدام قطارين في إسبانيا", ["اصطدام", "قطار", "اسبان", "طليطل", "قتل"]),
+          _cl("c2", "هجوم روسي على دنيبرو", ["هجوم", "روسي", "دنيبرو", "محط"]),
+          _cl("c3", "تماسيح في قطار بمصر", ["تمساح", "قطار", "مصر", "اسيوط"]),
+          _cl("c1b", "قطارات إسبانيا: حصيلة", ["اصطدام", "قطار", "اسبان", "طليطل", "حصيل"]),
+          _cl("c4", "زلزال اليابان", ["زلزال", "يابان", "هوكايدو"]),
+          _cl("c5", "غابات الأمازون", ["برازيل", "امازون", "غاب"])]
+    monkeypatch.setattr(W, "select_clusters", lambda n=9: cl)
+    monkeypatch.setattr(W, "source_block", lambda items, fetch_articles=True: items[0]["title"] + " " + SRC +
+                        " دنيبرو أوكرانيا زيلينسكي تماسيح أسيوط مصر وزارة الداخلية هوكايدو اليابان زلزال 6 البرازيل الأمازون")
+    monkeypatch.setattr(W, "verify_lines", lambda ch, lines, src: ([{"claim": "x"}], []))
+    monkeypatch.setattr(W, "standalone_check", lambda ch, items: [])
+    monkeypatch.setattr(W, "screen_problems", lambda lines, src: [])
+
+    def writer(p):
+        title = p.split("المصادر:")[-1].strip()
+        key = next(c["key"] for c in cl if title.startswith(c["items"][0]["title"]))
+        d = briefs.get(key) if p.startswith(W.BRIEF_PROMPT[:40]) else seg_json.get(key)
+        return json.dumps(d or {"safe": False}, ensure_ascii=False)
+    monkeypatch.setattr(W.R, "bound", lambda task, **k: _Fake(writer))
+    sp, rep = W.build_spec("2026-10-29", "06:30", n_main=3, fetch_articles=False)
+    assert [g["cluster"] for g in sp["segments"]] == ["c1", "c2", "c3"]
+    assert [b["cluster"] for b in sp["brief"]] == ["c4", "c5"]
+    B = RD.build(sp)
+    assert len(next(x for x in B["scenes"] if x["type"] == "list")["rows"]) == 2
+    cl[:] = [c for c in cl if c["key"] != "c5"]                    # only one other story -> no «باختصار», no fallback
+    sp, rep = W.build_spec("2026-10-29", "06:30", n_main=3, fetch_articles=False)
+    assert sp["brief"] == []
+    assert "brief" not in [g["k"] for g in RD.build(sp)["segs"]]
+
+
+def test_writer_rejects_vague_brief_and_rewrites_once(monkeypatch):
+    calls = []
+
+    def writer(p):
+        calls.append(p)
+        d = good()
+        if len(calls) == 1:
+            d["brief"] = "الحادث أوقع [[69 قتيلًا]]"                  # vague -> rejected, rewrite requested with the reason
+        return json.dumps(d, ensure_ascii=False)
+    monkeypatch.setattr(W, "verify_lines", lambda ch, lines, src: ([{"claim": "x"}], []))
+    monkeypatch.setattr(W, "standalone_check", lambda ch, items: [])
+    monkeypatch.setattr(W, "source_block", lambda items, fetch_articles=True: SRC)
+    c = _cl("k", "اصطدام قطارين", [])
+    seg, br, meta = W.write_segment(_Fake(writer), _Fake(lambda p: ""), c, "s1", fetch_articles=False)
+    assert seg and len(calls) == 2 and "الحادث" in calls[1].split("ملاحظة من المدقق")[-1]
+    assert br["t"] == good()["brief"]
+
+
+def test_writer_drops_story_when_checker_says_unclear_twice(monkeypatch):
+    monkeypatch.setattr(W, "verify_lines", lambda ch, lines, src: ([{"claim": "x"}], []))
+    monkeypatch.setattr(W, "source_block", lambda items, fetch_articles=True: SRC)
+    chk = _Fake(lambda p: '{"results": [' + ",".join('{"i": %d, "ok": %s}' % (i, "false" if i == 3 else "true") for i in range(1, 9)) + "]}")
+    seg, br, meta = W.write_segment(_Fake(lambda p: json.dumps(good(), ensure_ascii=False)), chk, _cl("k", "x", []), "s1", fetch_articles=False)
+    assert seg is None and "not understandable" in meta["error"]
+
+
+def test_outro_card_has_no_brand_tomorrow_or_two_source_line():
+    for mode, s in (("bulletin", spec()), ("edition", dict(spec(), segments=[dict(g, shots=[]) for g in spec()["segments"][:3]]))):
+        B = RD.build(s, mode=mode)
+        end = next(x for x in B["scenes"] if x["type"] == "end")
+        txt = json.dumps(end, ensure_ascii=False)
+        for w in ("قهوة اليوم", "غدًا", "مصدرين"):
+            assert w not in txt, (mode, w)
+    assert end and RD.build(spec())["scenes"][-1]["l1"] == "انتهت نشرة اليوم"
+    bad = RD.build(spec())
+    bad["scenes"][-1]["l2"] = "النشرة القادمة غدًا"
+    with pytest.raises(RD.RundownError, match="OUTRO"):
+        RD.check_outro(bad)
+    tpl = (ROOT / "kahwa_publisher/bulletin/templates/body.tpl.js").read_text()
+    assert "مصدرين" not in tpl and "القادمة غد" not in tpl and "انتهت نشرة قهوة" not in tpl
