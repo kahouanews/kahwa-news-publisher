@@ -1,0 +1,25 @@
+{
+ "models": {
+  "gemini/gemini-3.1-flash-lite": {
+   "day": "2026-10-30",
+   "req": 3,
+   "tok": 8445
+  },
+  "gemini/gemini-3.8-flash": {
+   "day": "2026-10-30",
+   "req": 1,
+   "tok": 8242
+  },
+  "gemini/gemma-4-26b-a4b-it": {
+   "day": "2026-10-30",
+   "req": 1,
+   "tok": 2030
+  },
+  "groq/qwen/qwen3.8-27b": {
+   "day": "2026-10-30",
+   "req": 9,
+   "tok": 11404
+  }
+ },
+ "updated": "2026-10-30T09:05:21Z"
+}
