@@ -2,24 +2,26 @@
  "models": {
   "gemini/gemini-3.1-flash-lite": {
    "day": "2026-10-30",
-   "req": 3,
-   "tok": 8445
+   "req": 4,
+   "tok": 14092
   },
   "gemini/gemini-3.8-flash": {
    "day": "2026-10-30",
+   "exhausted": true,
+   "learned_rpd": 20,
    "req": 1,
    "tok": 8242
   },
   "gemini/gemma-4-26b-a4b-it": {
    "day": "2026-10-30",
-   "req": 1,
-   "tok": 2030
+   "req": 2,
+   "tok": 3711
   },
   "groq/qwen/qwen3.8-27b": {
    "day": "2026-10-30",
-   "req": 9,
-   "tok": 11404
+   "req": 12,
+   "tok": 20528
   }
  },
- "updated": "2026-10-30T09:05:21Z"
+ "updated": "2026-10-30T12:20:40Z"
 }
