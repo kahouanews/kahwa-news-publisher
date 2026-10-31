@@ -3,18 +3,46 @@ on:
   schedule:
     - cron: "7,27,47 * * * *"   # odd minutes: GitHub drops/late-runs top-of-hour jobs
   workflow_dispatch:
+    inputs:
+      slot:
+        description: "Backup clock only (Cloudflare Worker): ISO slot time, e.g. 2026-11-01T06:30Z. Empty = snap the run start to the last scheduled slot"
+        type: string
+        default: ""
 permissions:
   contents: write
   issues: write
 concurrency:
-  group: publisher        # never two publishers at once (no duplicates)
+  group: publish            # one run per workflow at a time; duplicate clocks queue, then skip at the gate
   cancel-in-progress: false
 jobs:
+  gate:
+    # slot dedupe for 3 clocks (cron-job.org, Cloudflare Worker backup, GitHub schedule): kahwa_publisher/slots.py
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.g.outputs.run }}
+      slot: ${{ steps.g.outputs.slot }}
+      key: ${{ steps.g.outputs.key }}
+      mode: ${{ steps.g.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: { ref: main, persist-credentials: false }   # latest main at job start: sees markers pushed by an earlier clock
+      - id: g
+        env:
+          SLOT_IN: ${{ github.event_name == 'workflow_dispatch' && inputs.slot || '' }}
+          TEST: false
+          MODE_IN: auto
+        run: |
+          python3 -m kahwa_publisher.slots gate publish --slot "$SLOT_IN" --test "$TEST" --mode "$MODE_IN" | tee gate.json
+          echo "### slot gate: $(cat gate.json)" >> "$GITHUB_STEP_SUMMARY"
   publish:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
+        with: { ref: main }   # latest state/ + queue/ (a queued duplicate run must not act on a stale checkout)
       - uses: actions/setup-python@v7.1.0
         with: { python-version: "3.12" }
       - run: pip install -q cryptography==50.0.2   # pinned (requirements-ci.txt)
@@ -52,3 +80,11 @@ jobs:
       - name: Fail job if publish failed (GitHub emails the owner)
         if: steps.run.outcome == 'failure'
         run: exit 1
+      - name: Mark slot done (first successful run of the slot; the other clocks then skip at the gate)
+        if: success() && needs.gate.outputs.key != ''
+        run: |
+          python3 -m kahwa_publisher.slots done publish "${{ needs.gate.outputs.key }}"
+          git config user.name kahwa-bot; git config user.email kahwa-bot@users.noreply.github.com
+          git add state/slots.json
+          git diff --cached --quiet || git commit -qm "slot done ${{ needs.gate.outputs.key }}"
+          ok=0; for i in 1 2 3 4 5; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; sleep $((i*5)); done; [ $ok = 1 ]

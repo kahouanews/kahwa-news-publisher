@@ -3,15 +3,46 @@ on:
   schedule:
     - cron: "33 */2 * * *"
   workflow_dispatch:
+    inputs:
+      slot:
+        description: "Backup clock only (Cloudflare Worker): ISO slot time, e.g. 2026-11-01T06:30Z. Empty = snap the run start to the last scheduled slot"
+        type: string
+        default: ""
 permissions:
   contents: write
   issues: write
   actions: read
+concurrency:
+  group: watchdog            # one run per workflow at a time; duplicate clocks queue, then skip at the gate
+  cancel-in-progress: false
 jobs:
+  gate:
+    # slot dedupe for 3 clocks (cron-job.org, Cloudflare Worker backup, GitHub schedule): kahwa_publisher/slots.py
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.g.outputs.run }}
+      slot: ${{ steps.g.outputs.slot }}
+      key: ${{ steps.g.outputs.key }}
+      mode: ${{ steps.g.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: { ref: main, persist-credentials: false }   # latest main at job start: sees markers pushed by an earlier clock
+      - id: g
+        env:
+          SLOT_IN: ${{ github.event_name == 'workflow_dispatch' && inputs.slot || '' }}
+          TEST: false
+          MODE_IN: auto
+        run: |
+          python3 -m kahwa_publisher.slots gate watchdog --slot "$SLOT_IN" --test "$TEST" --mode "$MODE_IN" | tee gate.json
+          echo "### slot gate: $(cat gate.json)" >> "$GITHUB_STEP_SUMMARY"
   watch:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
+        with: { ref: main }   # latest state/ + queue/ (a queued duplicate run must not act on a stale checkout)
       - uses: actions/setup-python@v7.1.0
         with: { python-version: "3.12" }
       - run: python -m kahwa_publisher.dispatcher watchdog || true
@@ -66,3 +97,11 @@ jobs:
           if [ -n "$N" ]; then gh issue comment "$N" --body-file state/ALERT.txt || true; else gh issue create --title "$T" --body-file state/ALERT.txt || true; fi
           git config user.name kahwa-bot; git config user.email kahwa-bot@users.noreply.github.com
           git rm -q state/ALERT.txt && git commit -qm "watchdog alert" && git push -q || true
+      - name: Mark slot done (first successful run of the slot; the other clocks then skip at the gate)
+        if: success() && needs.gate.outputs.key != ''
+        run: |
+          python3 -m kahwa_publisher.slots done watchdog "${{ needs.gate.outputs.key }}"
+          git config user.name kahwa-bot; git config user.email kahwa-bot@users.noreply.github.com
+          git add state/slots.json
+          git diff --cached --quiet || git commit -qm "slot done ${{ needs.gate.outputs.key }}"
+          ok=0; for i in 1 2 3 4 5; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; sleep $((i*5)); done; [ $ok = 1 ]

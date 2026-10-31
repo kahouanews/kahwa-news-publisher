@@ -11,7 +11,7 @@ import json
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -388,3 +388,73 @@ def test_heartbeat_only_on_confirmed_facebook_post(tmp_path):
     (tmp_path / "queue").mkdir()
     (tmp_path / "queue" / "a.json").write_text(json.dumps({"id": "a", "text": "t", "media": []}))
     assert D.run() == 0 and not (tmp_path / "state" / "heartbeat.json").exists()
+
+
+# ------------------------------------------------------------------ 3 clocks, 1 slot: kahwa_publisher/slots.py
+def _slots(tmp_path, monkeypatch):
+    import importlib
+    monkeypatch.setenv("KAHWA_ROOT", str(tmp_path))
+    import kahwa_publisher.slots as SL
+    importlib.reload(SL)
+    return SL
+
+
+def test_slot_grid_comes_from_the_workflow_crons(tmp_path, monkeypatch):
+    SL = _slots(tmp_path, monkeypatch)
+    U = lambda h, m: datetime(2026, 11, 1, h, m, 40, tzinfo=timezone.utc)
+    assert SL.snap("publish", U(10, 30)) == U(10, 27).replace(second=0)
+    assert SL.snap("newsroom", U(8, 0)) == U(7, 13).replace(second=0)
+    assert SL.snap("bulletin", U(6, 33)) == U(6, 30).replace(second=0)
+    assert SL.snap("reel", U(8, 14)) == U(8, 11).replace(second=0) and SL.snap("reel", U(12, 0)) == U(11, 41).replace(second=0)
+    assert SL.snap("watchdog", U(9, 0)) == U(8, 33).replace(second=0)
+
+
+def test_three_clocks_run_a_slot_once(tmp_path, monkeypatch):
+    SL = _slots(tmp_path, monkeypatch)
+    t0 = datetime(2026, 11, 1, 6, 30, 5, tzinfo=timezone.utc)
+    a = SL.gate("bulletin", "", now=t0)                                         # cron-job.org, exact minute, no slot
+    assert a["run"] == "true" and a["key"] == "bulletin@2026-11-01T06:30Z"
+    SL.mark_done(a["key"], 1, now=t0)
+    b = SL.gate("bulletin", "2026-11-01T06:30Z", now=t0 + timedelta(minutes=3))  # Cloudflare Worker backup, with slot
+    c = SL.gate("bulletin", "", now=t0 + timedelta(hours=3))                     # GitHub schedule, 3 h late
+    assert b["run"] == "false" and "already done" in b["reason"] and c["run"] == "false"
+    d = SL.gate("bulletin", "", now=t0 + timedelta(hours=7))                     # 7 h late: stale, never airs
+    assert d["run"] == "false" and "stale" in d["reason"]
+
+
+def test_failed_first_clock_leaves_the_slot_to_the_backup(tmp_path, monkeypatch):
+    SL = _slots(tmp_path, monkeypatch)
+    t0 = datetime(2026, 11, 1, 11, 41, tzinfo=timezone.utc)
+    assert SL.gate("reel", "", now=t0)["run"] == "true"                          # run 1 fails: nothing marked
+    b = SL.gate("reel", "2026-11-01T11:41:00Z", now=t0 + timedelta(minutes=3))
+    assert b["run"] == "true" and b["mode"] == "single"
+
+
+def test_reel_mode_auto_from_slot_and_explicit_input_wins(tmp_path, monkeypatch):
+    SL = _slots(tmp_path, monkeypatch)
+    t = datetime(2026, 11, 1, 8, 11, tzinfo=timezone.utc)
+    assert SL.gate("reel", "", now=t)["mode"] == "edition"
+    assert SL.gate("reel", "", mode="single", now=t)["mode"] == "single"
+    assert SL.gate("reel", "", now=t + timedelta(hours=3, minutes=30))["mode"] == "single"   # 11:41 slot
+
+
+def test_test_runs_are_not_gated(tmp_path, monkeypatch):
+    SL = _slots(tmp_path, monkeypatch)
+    SL.mark_done("bulletin@2026-11-01T06:30Z")
+    r = SL.gate("bulletin", "", test=True, now=datetime(2026, 11, 1, 6, 31, tzinfo=timezone.utc))
+    assert r["run"] == "true" and r["key"] == ""
+
+
+def test_every_scheduled_workflow_is_gated_and_dispatchable_with_a_bare_body():
+    import yaml
+    for wf in ("publish", "newsroom", "watchdog", "reel", "bulletin"):
+        d = yaml.safe_load((ROOT / ".github" / "workflows" / f"{wf}.yml").read_text())
+        on = d[True]
+        assert "schedule" in on and "workflow_dispatch" in on and "slot" in on["workflow_dispatch"]["inputs"]
+        assert d["concurrency"]["group"] == wf and d["concurrency"]["cancel-in-progress"] is False
+        main = [j for n, j in d["jobs"].items() if n != "gate"][0]
+        assert main["needs"] == "gate" and "needs.gate.outputs.run == 'true'" in main["if"]
+        assert any("slots done" in (st.get("run") or "") for st in main["steps"])
+        for k, v in on["workflow_dispatch"]["inputs"].items():                 # {"ref":"main"} = production behaviour
+            assert not (k == "dry_run" and v.get("default") is True), f"{wf}: bare dispatch would be a dry run"
+    assert yaml.safe_load((ROOT / ".github/workflows/reel.yml").read_text())[True]["workflow_dispatch"]["inputs"]["mode"]["default"] == "auto"

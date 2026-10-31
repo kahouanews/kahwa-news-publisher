@@ -4,14 +4,18 @@ on:
     - cron: "13 5-22/2 * * *"   # every 2h, 06:13-23:13 Algeria time
   workflow_dispatch:
     inputs:
+      slot:
+        description: "Backup clock only (Cloudflare Worker): ISO slot time, e.g. 2026-11-01T06:30Z. Empty = snap the run start to the last scheduled slot"
+        type: string
+        default: ""
       dry_run:
         description: "Test run: write posts + cards as a workflow artifact only (nothing queued, state/ and media/ untouched)"
         type: boolean
-        default: true
+        default: false
       llm_probe:
         description: "Also list Gemini model ids, probe the cheap models with one tiny call each, and print LLM availability"
         type: boolean
-        default: true
+        default: false
       writer_models:
         description: "Optional writer chain override for this run (comma list provider:model, e.g. gemini:gemma-4-31b-it)"
         type: string
@@ -20,10 +24,32 @@ permissions:
   contents: write
   issues: write
 concurrency:
-  group: publisher
+  group: newsroom            # one run per workflow at a time; duplicate clocks queue, then skip at the gate
   cancel-in-progress: false
 jobs:
+  gate:
+    # slot dedupe for 3 clocks (cron-job.org, Cloudflare Worker backup, GitHub schedule): kahwa_publisher/slots.py
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.g.outputs.run }}
+      slot: ${{ steps.g.outputs.slot }}
+      key: ${{ steps.g.outputs.key }}
+      mode: ${{ steps.g.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: { ref: main, persist-credentials: false }   # latest main at job start: sees markers pushed by an earlier clock
+      - id: g
+        env:
+          SLOT_IN: ${{ github.event_name == 'workflow_dispatch' && inputs.slot || '' }}
+          TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          MODE_IN: auto
+        run: |
+          python3 -m kahwa_publisher.slots gate newsroom --slot "$SLOT_IN" --test "$TEST" --mode "$MODE_IN" | tee gate.json
+          echo "### slot gate: $(cat gate.json)" >> "$GITHUB_STEP_SUMMARY"
   write:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45   # write + fact-check + claim verification per story; Groq free tier is paced (8K TPM, 1K output TPM)
     env:
@@ -31,6 +57,7 @@ jobs:
       LLM_CHAIN_WRITER: ${{ github.event_name == 'workflow_dispatch' && inputs.writer_models || '' }}
     steps:
       - uses: actions/checkout@v7.0.1
+        with: { ref: main }   # latest state/ + queue/ (a queued duplicate run must not act on a stale checkout)
       - uses: actions/setup-python@v7.1.0
         with: { python-version: "3.12" }
       - run: pip install -q feedparser==6.0.14 pillow==13.0.0   # pinned (requirements-ci.txt)
@@ -92,3 +119,11 @@ jobs:
         if: env.DRY != 'true'
         run: |
           find media \( -name '*.jpg' -o -name '*.mp4' \) -mtime +7 -delete 2>/dev/null || true
+      - name: Mark slot done (first successful run of the slot; the other clocks then skip at the gate)
+        if: success() && needs.gate.outputs.key != ''
+        run: |
+          python3 -m kahwa_publisher.slots done newsroom "${{ needs.gate.outputs.key }}"
+          git config user.name kahwa-bot; git config user.email kahwa-bot@users.noreply.github.com
+          git add state/slots.json
+          git diff --cached --quiet || git commit -qm "slot done ${{ needs.gate.outputs.key }}"
+          ok=0; for i in 1 2 3 4 5; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; sleep $((i*5)); done; [ $ok = 1 ]
