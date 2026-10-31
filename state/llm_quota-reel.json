@@ -5,8 +5,14 @@
    "req": 13,
    "tok": 39282
   },
+  "gemini/gemini-3.5-flash-lite": {
+   "day": "2026-10-31",
+   "req": 3,
+   "tok": 8844
+  },
   "gemini/gemini-3.6-flash": {
    "day": "2026-10-31",
+   "exhausted": true,
    "learned_rpd": 20,
    "req": 3,
    "tok": 18935
@@ -20,13 +26,18 @@
   },
   "gemini/gemma-4-26b-a4b-it": {
    "day": "2026-10-31",
+   "req": 2,
+   "tok": 4041
+  },
+  "gemini/gemma-4-31b-it": {
+   "day": "2026-10-31",
    "req": 1,
-   "tok": 1979
+   "tok": 5692
   },
   "groq/qwen/qwen3.8-27b": {
    "day": "2026-10-31",
-   "req": 9,
-   "tok": 13177
+   "req": 18,
+   "tok": 25003
   },
   "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free": {
    "day": "2026-10-30",
@@ -41,5 +52,5 @@
    "tok": 0
   }
  },
- "updated": "2026-10-31T08:55:39Z"
+ "updated": "2026-10-31T10:02:50Z"
 }
