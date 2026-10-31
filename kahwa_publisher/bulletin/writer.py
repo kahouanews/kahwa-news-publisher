@@ -15,6 +15,7 @@ import re
 from .. import attribution as A
 from .. import llm as R
 from .. import safety
+from .. import spelling
 from ..reels.render import BANNED_ISO, banned_hits
 from ..reels.story import number_ok, numbers_in, point_in_country, source_block
 from ..verify import check as vcheck
@@ -121,7 +122,8 @@ def select_clusters(n=9, min_sources=2):
             log({"signal_error": str(ex)[:200]})
     cands = []
     for c in clusters:
-        if len(c["sources"]) < min_sources or N.blocked(c) or not safety.keyword_ok(c):
+        c = N.purge_items(c)                    # religion / banned-country items out of mixed clusters (2026-10-31)
+        if not c["items"] or len(c["sources"]) < min_sources or N.blocked(c) or not safety.keyword_ok(c):
             continue
         text = " ".join(i["title"] + " " + i["summary"] for i in c["items"])
         words = set(N.norm(text).split())
@@ -470,6 +472,18 @@ def write_segment(writer, checker, c, key, fetch_articles=True, brief_only=False
             probs = screen_problems(lines, src) + self_contained_problems(sc_lines, anchors)
             if probs:
                 raise ValueError("; ".join(probs[:4]))
+            # Arabic spelling sanity check (2026-10-31): safe typo fixes applied, anything else fails closed (rewrite/drop)
+            fixes, unresolved = spelling.proofread(R.bound("utility"), lines, src)
+            if unresolved:
+                raise ValueError("spelling: " + "، ".join(unresolved[:4]))
+            if fixes:
+                brief, extra = spelling.apply(brief, fixes), spelling.apply(extra, fixes)
+                if seg is not None:
+                    seg = spelling.apply(seg, fixes)
+                    lines = seg_lines(seg, brief["t"])
+                else:
+                    lines = spelling.apply(lines, fixes)
+                sa_items = spelling.apply(sa_items, fixes)
             unclear = standalone_check(checker, sa_items)
             if unclear and seg is not None and all(k == "map" for _, k, _, _ in unclear):
                 seg = dict(seg, shots=[sh for sh in seg["shots"] if sh["type"] != "map"])   # optional «أين» line: drop it

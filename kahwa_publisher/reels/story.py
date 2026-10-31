@@ -6,6 +6,9 @@ tragic stories are forced to the calm music bed.
 Attribution (2026-10-29): on-screen source chips and the caption name only PRIMARY sources (official body > wire agency >
 «وكالات»), validated against the source texts; competing outlets are never named (the writer sees sources as [م1] …,
 and build_story raises on any outlet name). The outlets that verified the story stay in the run summary only.
+2026-10-31: numbers are compared as VALUES (kahwa_publisher/numbers.py: «70 ألف» = 70000 = 70,000 = ٧٠ ألفاً), a story is
+only made when its source texts name a primary source (official body / wire agency; outlet-only copy -> StoryError
+"no primary source"), and every on-screen line passes the Arabic spelling check (kahwa_publisher/spelling.py, fail closed).
 """
 import json
 import re
@@ -16,7 +19,9 @@ from pathlib import Path
 from .. import attribution as A
 from .. import geo
 from .. import llm as R
+from .. import numbers as NUM
 from .. import safety
+from .. import spelling
 from .render import ASSETS, BANNED_ISO, banned_hits
 
 AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
@@ -76,13 +81,35 @@ def norm_digits(s):
 
 
 def numbers_in(text):
-    return [re.sub(r"[.,]$", "", n) for n in re.findall(r"\d[\d.,]*", norm_digits(text))]
+    """Number mentions written with digits, as shown (incl. a magnitude word: «70 ألف»). kahwa_publisher/numbers.py"""
+    return [raw for raw, _v in NUM.mentions(text)]
 
 
 def number_ok(n, src):
-    """Same idea as newsroom's subline check (substring of the source texts), comma-insensitive."""
-    flat = re.sub(r"(?<=\d)[,٬](?=\d)", "", norm_digits(src))
-    return n in norm_digits(src) or n.replace(",", "") in flat
+    """Is the figure `n` (a mention from numbers_in, or any short text) stated in the sources? Compared as VALUES after
+    normalisation (70000 = 70,000 = 70.000 = «70 ألف» = «٧٠ ألفاً» = «سبعين ألف»), not as a digit substring (2026-10-31,
+    reel runs 41197869535 / 41198098858 / 41199797479 failed on «70 ألف» vs 70000)."""
+    return not NUM.unsupported(str(n), src)
+
+
+def counter_display(disp):
+    """LLM counter display -> (display, value) or ("", 0): one number, optional magnitude word folded into the digits
+    («70 ألف» -> "70,000", 70000). Anything else -> no counter (the key fact is shown instead)."""
+    d = NUM.norm(str(disp or "")).strip()
+    ms = NUM.mentions(d)
+    if len(ms) != 1 or re.sub(r"\s", "", ms[0][0]) != re.sub(r"\s", "", d):     # one bare figure only (no %, no words)
+        return "", 0
+    raw = ms[0][0]
+    m = re.match(NUM._NUM, NUM.norm(raw))
+    base = NUM._readings(m.group(0), m.group("sep"))[0]
+    rest = NUM.norm(raw)[m.end():].strip()
+    mag = NUM._mult(rest if re.search(r"[\u0621-\u064A]", rest) else None, rest if re.search(r"[A-Za-z]", rest) else None) if rest else 1
+    v = base * mag
+    if mag > 1 or m.group("sep"):
+        shown = f"{int(v):,}" if v == v.to_integral_value() else NUM.canon(v)
+    else:
+        shown = m.group(0)
+    return shown, float(v)
 
 
 def date_ar(now=None):
@@ -205,6 +232,12 @@ def build_story(d, items, src_text, sid, outlets):
         [b.get("source") for b in (d.get("breaking_lines") or []) if isinstance(b, dict)] + \
         [(d.get("counter") or {}).get("source")] + list((d.get("next") or {}).get("sources") or [])
     primary = A.rank(cand, src_text, limit=3)
+    # primary-sources-only rule (2026-10-31): the outlet articles are the text we verify against, but a reel is only made
+    # when those texts name the PRIMARY origin of the facts (official body / wire agency). Outlet-only copy -> no reel.
+    if not primary:
+        primary = A.primary_in_sources(src_text)
+    if not primary:
+        raise StoryError("no primary source: the source texts attribute nothing to an official body or wire agency")
     loc = d.get("location") or {}
     iso = str(loc.get("country_iso3", "")).upper()
     if iso in BANNED_ISO or iso not in countries():
@@ -229,9 +262,7 @@ def build_story(d, items, src_text, sid, outlets):
         raise StoryError("need 2 next lines")
     nsrc = (nxt.get("sources") or []) + [None, None]
     cnt = d.get("counter") or {}
-    disp = norm_digits(str(cnt.get("display", "")).strip())
-    if not re.fullmatch(r"\d[\d,.]*", disp or "-"):
-        disp = ""
+    disp, disp_value = counter_display(cnt.get("display", ""))
     country_ar = countries()[iso]["properties"].get("ar") or PLACE_AR.get(iso, "")
     S = {
         "id": sid, "date_ar": date_ar(), "topic_ar": _clean(d.get("topic_ar"), 24),
@@ -255,7 +286,7 @@ def build_story(d, items, src_text, sid, outlets):
         "media": {},
     }
     if disp:
-        S["big_number"] = {"value": float(disp.replace(",", "")), "display": disp, "prefix_ar": _clean(cnt.get("prefix_ar"), 14),
+        S["big_number"] = {"value": disp_value, "display": disp, "prefix_ar": _clean(cnt.get("prefix_ar"), 14),
                            "label_ar": _clean(cnt.get("label_ar"), 40), "sub_ar": _clean(cnt.get("sub_ar"), 50), "source": src_of(cnt.get("source"))}
     else:   # no sourced figure: the counter scene shows the key fact instead (no invented number)
         k = S["facts"][0]["text"]
@@ -264,7 +295,7 @@ def build_story(d, items, src_text, sid, outlets):
     vis = json.dumps({k: v for k, v in S.items() if k not in ("id", "date_ar", "location", "footage_queries", "media", "mood",
                                                               "tragic", "urgent", "sources", "tagline")}, ensure_ascii=False)
     vis = re.sub(r'"value": [\d.]+', "", vis)
-    bad = [n for n in numbers_in(vis) if not number_ok(n, src_text)]
+    bad = NUM.unsupported(vis, src_text)
     if bad:
         raise StoryError(f"numbers not in sources: {bad}")
     # ---- tragedy: never upbeat music on deaths/disasters
@@ -373,8 +404,7 @@ def shorten_fields(llm, d, log=print, rounds=3):
             break
         for (obj, k, key, lim), new in zip(over, lines):
             if isinstance(new, str) and new.strip() and _plain_len(new) < _plain_len(obj[k]):
-                old_nums = sorted(numbers_in(obj[k]))
-                if sorted(numbers_in(new)) == old_nums or set(numbers_in(new)) <= set(old_nums):
+                if NUM.values(new) <= NUM.values(obj[k]):           # same figures (as values), never a new one
                     obj[k] = new.strip()
         log(json.dumps({"shortened": [key for (_o, _k, key, _l) in over], "round": r}, ensure_ascii=False))
     for obj, k, key, lim in _slots(d):                          # decorative lines that are still too long: drop
@@ -452,6 +482,11 @@ def write_story(llm, items, outlets, sid, fetch_articles=True, log=print, hint=N
                 raise StoryError("llm marked unsafe")
             d = shorten_fields(shortener, d, log=log)
             S = build_story(d, items, src, sid, outlets)
+            fixes, unresolved = spelling.proofread(shortener, spelling.story_lines(S), src, log=log)
+            if unresolved:                                         # fail closed: never on screen with a misspelling
+                raise StoryError("spelling: " + "، ".join(unresolved[:4]))
+            if fixes:
+                S = spelling.apply(S, fixes)
             ok, problems = fact_check(checker, S, src)
             if not ok and drop_unverifiable_captions(S, problems, log=log):
                 ok, problems = fact_check(checker, S, src)              # re-check what is left (fail closed)
@@ -463,6 +498,7 @@ def write_story(llm, items, outlets, sid, fetch_articles=True, log=print, hint=N
         except (StoryError, ValueError) as ex:
             err = str(ex)[:200]
             log(json.dumps({"story_reject": err, "attempt": attempt}, ensure_ascii=False))
-            if "llm marked unsafe" in err or "banned" in err:
-                break                                              # never rewrite an unsafe story into a safe-looking one
+            if "llm marked unsafe" in err or "banned" in err or err.startswith("no primary source"):
+                break                                              # never rewrite an unsafe story into a safe-looking one;
+                                                                   # a missing primary source is a property of the sources
     raise StoryError(err or "story failed")

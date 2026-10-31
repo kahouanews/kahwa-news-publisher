@@ -5,6 +5,7 @@ safe to run three times per slot.
     python -m kahwa_publisher.slots gate <workflow> [--slot ISO] [--test true|false] [--mode auto|single|edition]
         -> GITHUB_OUTPUT: run=true|false, slot=<ISO UTC>, key=<workflow>@<YYYY-MM-DDTHH:MMZ>, reason=..., mode=...
     python -m kahwa_publisher.slots done <workflow> <key> [--run-id N]
+    python -m kahwa_publisher.slots fail <workflow> <key> [--run-id N]     (failed run: attempt counter, max MAX_ATTEMPTS)
 
 Design
 - The slot grid is read from the workflow's own `schedule:` crons (.github/workflows/<workflow>.yml), so GitHub's schedule,
@@ -34,6 +35,10 @@ STATE_DIR = ROOT / "state" / "slots"            # one file per workflow: workflo
 # how long after its scheduled time a slot may still run (minutes)
 WINDOW = {"publish": 20, "newsroom": 120, "watchdog": 120, "reel": 150, "bulletin": 360}
 KEEP_DAYS = 10
+# deterministic-failure guard (2026-10-31, reel runs 41197869535 / 41198098858 / 41199797479: three clocks, one slot, the same
+# StoryError three times): every FAILED run of a slot is counted in state/slots/attempts/<workflow>.json; once a slot has
+# failed MAX_ATTEMPTS times the remaining clocks skip it at the gate (the next slot starts fresh). Test runs never count.
+MAX_ATTEMPTS = {"reel": 2, "bulletin": 2, "newsroom": 2}
 EDITION_TIMES = {(8, 11), (14, 11)}      # reel.yml "11 8,14 * * *" = «العالم في 30 ثانية» edition reels
 
 
@@ -117,6 +122,37 @@ def mark_done(k, run_id=None, now=None):
     return st
 
 
+def _afile(k):
+    return STATE_DIR / "attempts" / f"{k.split('@', 1)[0]}.json"
+
+
+def load_attempts(k):
+    try:
+        return json.loads(_afile(k).read_text())
+    except Exception:
+        return {}
+
+
+def failures(k):
+    return int((load_attempts(k).get(k) or {}).get("n", 0))
+
+
+def mark_failed(k, run_id=None, now=None):
+    """Count one failed run of slot k (kept KEEP_DAYS days)."""
+    now = now or datetime.now(timezone.utc)
+    st = load_attempts(k)
+    cutoff = (now - timedelta(days=KEEP_DAYS)).strftime("%Y-%m-%dT%H:%M")
+    st = {kk: v for kk, v in st.items() if kk.split("@", 1)[-1] >= cutoff}
+    rec = st.get(k) or {"n": 0, "runs": []}
+    rec["n"] = int(rec.get("n", 0)) + 1
+    rec["runs"] = (list(rec.get("runs") or []) + [run_id])[-5:]
+    rec["t"] = now.isoformat(timespec="seconds")
+    st[k] = rec
+    _afile(k).parent.mkdir(parents=True, exist_ok=True)
+    _afile(k).write_text(json.dumps(st, indent=1, sort_keys=True))
+    return rec["n"]
+
+
 # ------------------------------------------------------------------ gate
 def parse_iso(s):
     return datetime.fromisoformat(s.strip().replace("Z", "+00:00")).astimezone(timezone.utc)
@@ -140,6 +176,9 @@ def gate(workflow, slot_in="", test=False, mode="auto", now=None):
             out.update(run="false", reason=out["reason"] + f"stale: slot {k} is {age:.0f} min old (> {WINDOW.get(workflow)} min)")
         elif is_done(k):
             out.update(run="false", reason=out["reason"] + f"slot {k} already done by another clock")
+        elif failures(k) >= MAX_ATTEMPTS.get(workflow, 2):
+            out.update(run="false", reason=out["reason"] + f"slot {k} gave up: failed {failures(k)} times "
+                                                           f"(max {MAX_ATTEMPTS.get(workflow, 2)}; deterministic-failure guard)")
         else:
             out["reason"] += f"slot {k} not done yet: running"
     if workflow == "reel":
@@ -155,7 +194,7 @@ def gate(workflow, slot_in="", test=False, mode="auto", now=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["gate", "done"])
+    ap.add_argument("cmd", choices=["gate", "done", "fail"])
     ap.add_argument("workflow")
     ap.add_argument("key", nargs="?")
     ap.add_argument("--slot", default="")
@@ -174,6 +213,9 @@ def main():
         return 0
     if not a.key:
         print("no slot key (test run): nothing marked")
+        return 0
+    if a.cmd == "fail":
+        print(json.dumps({"failed": a.key, "attempts": mark_failed(a.key, a.run_id)}))
         return 0
     mark_done(a.key, a.run_id)
     print(json.dumps({"marked": a.key}))

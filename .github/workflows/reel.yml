@@ -214,7 +214,7 @@ jobs:
           git add queue
           for f in state/reels_seen.json state/llm_quota-reel.json state/stings.json; do [ -f "$f" ] && git add "$f"; done
           git diff --cached --quiet || git commit -m "reel queued ${ID}"
-          ok=0; for i in 1 2 3 4; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; sleep 7; done; [ $ok = 1 ]
+          ok=0; for i in 1 2 3 4; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; echo "push race (another bot commit landed first): rebase + retry $i/4"; sleep $((i*7)); done; [ $ok = 1 ]
       - name: Card fallback (video failed after verification; queued only while publishing is enabled)
         if: success() && hashFiles('out/fallback-item.json') != ''
         run: |
@@ -225,7 +225,7 @@ jobs:
           git add queue media
           for f in state/reels_seen.json state/llm_quota-reel.json; do [ -f "$f" ] && git add "$f"; done
           git diff --cached --quiet || git commit -m "reel card fallback ${ID}"
-          ok=0; for i in 1 2 3 4; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; sleep 7; done; [ $ok = 1 ]
+          ok=0; for i in 1 2 3 4; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; echo "push race (another bot commit landed first): rebase + retry $i/4"; sleep $((i*7)); done; [ $ok = 1 ]
       - name: Degraded notice (one issue thread, not one per run)
         if: always() && hashFiles('out/degraded.txt') != '' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
         env: { GH_TOKEN: "${{ github.token }}" }
@@ -240,8 +240,10 @@ jobs:
           git config user.name "kahwa-bot"
           git config user.email "kahwa-bot@users.noreply.github.com"
           git add state/llm_quota-reel.json
+          # stories dropped by a gate are marked as reeled (make.py) so the next slot writes another one
+          [ -f state/reels_seen.json ] && git add state/reels_seen.json
           git diff --cached --quiet || git commit -m "reel llm quota $(date -u +%FT%TZ)"
-          ok=0; for i in 1 2 3 4; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; sleep 7; done; [ $ok = 1 ]
+          ok=0; for i in 1 2 3 4; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; echo "push race (another bot commit landed first): rebase + retry $i/4"; sleep $((i*7)); done; [ $ok = 1 ]
       - name: Alert (GitHub issue = email) and skip
         # manual dry-run tests fail loudly in the run itself but do not open an issue/email
         if: failure() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) && (github.run_attempt >= 2 || !(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
@@ -264,3 +266,17 @@ jobs:
             git diff --cached --quiet && { ok=1; break; }
             git commit -qm "slot done ${{ needs.gate.outputs.key }}" && git push -q origin HEAD:main && { ok=1; break; }
             sleep $((i*5)); done; [ $ok = 1 ]
+      - name: Count a failed attempt (deterministic-failure guard; the gate gives up on a slot after 2 failed runs)
+        # 2026-10-31 (runs 41197869535 / 41198098858 / 41199797479): failed runs leave no slot marker, so every clock
+        # (cron-job.org, Worker, GitHub schedule) re-ran the same deterministic failure. kahwa_publisher/slots.py MAX_ATTEMPTS.
+        if: failure() && needs.gate.outputs.key != ''
+        run: |
+          git config user.name kahwa-bot; git config user.email kahwa-bot@users.noreply.github.com
+          ok=0; for i in 1 2 3 4 5; do
+            git rebase --abort 2>/dev/null || true
+            git fetch -q origin main && git reset -q --hard origin/main
+            python3 -m kahwa_publisher.slots fail reel "${{ needs.gate.outputs.key }}"
+            git add state/slots
+            git diff --cached --quiet && { ok=1; break; }
+            git commit -qm "slot attempt failed ${{ needs.gate.outputs.key }}" && git push -q origin HEAD:main && { ok=1; break; }
+            sleep $((i*5)); done; [ $ok = 1 ] || echo "::warning::could not record the failed attempt"

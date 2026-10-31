@@ -318,6 +318,14 @@ def attributions(text):
     return out
 
 
+def primary_in_sources(sources_text, limit=3):
+    """Primary sources the source texts THEMSELVES attribute facts to (official bodies, then wire agencies), validated by
+    rank(). Used by the primary-sources-only gate (2026-10-31): a story whose texts name no official body / wire agency as
+    the origin of its facts is outlet copy only and is not made."""
+    cands = [e for e in attributions(sources_text) if classify(e) in ("official", "wire")] + sorted(wires_in(sources_text))
+    return rank(cands, sources_text, limit)
+
+
 def unsupported_attributions(text, sources_text):
     """In-text attributions not backed by the sources (don't invent "قالت وزارة …") or naming an outlet."""
     bad = []

@@ -24,7 +24,7 @@ from .. import llm as R
 from .. import safety
 from . import media as M
 from .render import gate, render_story
-from .story import drop_unverifiable_captions, write_story
+from .story import StoryError, drop_unverifiable_captions, write_story
 
 REPO = os.getenv("GITHUB_REPOSITORY", "kahouanews/kahwa-news-publisher")
 MEDIA_BRANCH = os.getenv("REELS_MEDIA_BRANCH", "reels-media")
@@ -113,6 +113,62 @@ class Rejected(RuntimeError):
     """Editorial fail-closed outcome (claims not supported by the sources): the story is skipped, not a job failure."""
 
 
+# rejections that are editorial verdicts on the story itself (not a pipeline problem): all-editorial -> skip, exit 0
+EDITORIAL_RE = re.compile(r"Rejected:|llm marked unsafe|banned|no primary source|fact-check|claim verification|graphic/gore|"
+                          r"competing outlet")
+
+
+def make_story(c, writer, checker, shortener, summary, dry=True, no_articles=False):
+    """One candidate cluster -> verified story S (write_story + second verification layer). Raises StoryError / Rejected."""
+    sid = datetime.now(timezone.utc).strftime("%Y%m%d%H%M") + "-" + c["key"]
+    summary["story_titles"] = [i["title"] for i in c["items"][:4]]
+    summary["outlets"] = c["sources"]          # internal only: the outlets that carried the story (discovery + 2-outlet check)
+    S, _src = write_story(writer, c["items"], c["sources"], sid, fetch_articles=not no_articles, log=log,
+                          checker=checker, shortener=shortener)
+    dropped = False
+    for attempt in range(3):
+        bad = verify_reel(S, "B" if S.get("urgent") else "A", summary, checker)
+        if not bad:
+            break
+        if not dropped and drop_unverifiable_captions(S, [b["claim"] for b in bad], log=log):
+            dropped = True                     # unverifiable image caption / ticker: drop it, re-verify the rest
+            continue
+        if attempt == 2:
+            raise Rejected(f"claim verification failed, reel NOT made: {bad[:3]}")
+        hint = ("هذه الأسطر غير مدعومة بالمصادر، احذفها أو اكتبها بما تقوله المصادر حرفياً فقط: " +
+                " | ".join(b["claim"] for b in bad[:6]))
+        log({"reel_verify_retry": bad[:6]})
+        S, _src = write_story(writer, c["items"], c["sources"], sid, fetch_articles=False, log=log, hint=hint, src=_src,
+                              checker=checker, shortener=shortener)
+    return S, c
+
+
+def choose_story(cands, writer, checker, shortener, summary, seen, dry=True, no_articles=False, mark=None):
+    """Try the candidates in order; a story that fails a gate is dropped (and, on real runs, marked as reeled so the next
+    slot does not rewrite it). -> (S, cluster, dropped). Raises Rejected when every candidate failed an editorial gate
+    (skip, exit 0), StoryError when any failed otherwise (pipeline problem: exit 1, alert). R.Hold propagates."""
+    if mark is None:
+        from ..newsroom import mark_reeled as mark
+    dropped = []
+    for c0 in cands:
+        try:
+            S, c = make_story(c0, writer, checker, shortener, summary, dry=dry, no_articles=no_articles)
+            summary["dropped_stories"] = dropped
+            return S, c, dropped
+        except (StoryError, Rejected) as ex:
+            why = f"{type(ex).__name__}: {str(ex)[:300]}"
+            dropped.append({"title": c0["items"][0]["title"][:90], "why": why})
+            log({"story_dropped": c0["items"][0]["title"][:90], "why": why})
+            summary.pop("verification", None)
+            if not dry and seen is not None:
+                mark(seen, c0)                 # the next slot picks another story instead of rewriting this one
+    summary["dropped_stories"] = dropped
+    whys = [d["why"] for d in dropped]
+    if whys and all(EDITORIAL_RE.search(w) for w in whys):
+        raise Rejected(f"no candidate passed the editorial gates ({len(whys)} tried): " + " || ".join(whys)[:900])
+    raise StoryError(f"no candidate passed the gates ({len(whys)} tried): " + " || ".join(whys)[:1200])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="out")
@@ -139,7 +195,7 @@ def main():
             media_root = Path(a.story).resolve().parent
             seen = c = None
         else:
-            from ..newsroom import mark_reeled, pick_reel_cluster
+            from ..newsroom import mark_reeled, pick_reel_clusters
             if not dry and FB.slot_done(slot):        # idempotent: a duplicated trigger / re-run never makes a 2nd reel
                 summary["result"] = f"skipped: slot {slot} already done"
                 (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1))
@@ -154,32 +210,18 @@ def main():
             writer = R.bound("writer")
             checker = R.bound("factcheck", exclude_from=writer)     # never the writer's model family
             shortener = R.bound("utility")
-            c, seen = pick_reel_cluster()
-            if not c:
+            cands, seen = pick_reel_clusters(n=int(os.getenv("REEL_CANDIDATES", "3")))
+            if not cands:
                 log({"skip": "no eligible story"})
                 summary["result"] = "skipped: no eligible story"
                 (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1))
                 return 0
-            sid = datetime.now(timezone.utc).strftime("%Y%m%d%H%M") + "-" + c["key"]
-            summary["story_titles"] = [i["title"] for i in c["items"][:4]]
-            summary["outlets"] = c["sources"]
-            S, _src = write_story(writer, c["items"], c["sources"], sid, fetch_articles=not a.no_articles, log=log,
-                                  checker=checker, shortener=shortener)
-            dropped = False
-            for attempt in range(3):
-                bad = verify_reel(S, "B" if S.get("urgent") else "A", summary, checker)
-                if not bad:
-                    break
-                if not dropped and drop_unverifiable_captions(S, [b["claim"] for b in bad], log=log):
-                    dropped = True                     # unverifiable image caption / ticker: drop it, re-verify the rest
-                    continue
-                if attempt == 2:
-                    raise Rejected(f"claim verification failed, reel NOT made: {bad[:3]}")
-                hint = ("هذه الأسطر غير مدعومة بالمصادر، احذفها أو اكتبها بما تقوله المصادر حرفياً فقط: " +
-                        " | ".join(b["claim"] for b in bad[:6]))
-                log({"reel_verify_retry": bad[:6]})
-                S, _src = write_story(writer, c["items"], c["sources"], sid, fetch_articles=False, log=log, hint=hint, src=_src,
-                                      checker=checker, shortener=shortener)
+            # 2026-10-31 (runs 41197869535 / 41198098858 / 41199797479): ONE story failing a gate (numbers, primary source,
+            # spelling, fact-check, claim verification) no longer fails the reel. That story is dropped (fail closed: it is
+            # never published) and the next verified candidate is written. Only when no candidate passes does the run end:
+            # editorial-only rejections -> skip (exit 0), anything else -> failure (exit 1, alert).
+            S, c, dropped_stories = choose_story(cands, writer, checker, shortener, summary, seen, dry=dry,
+                                                 no_articles=a.no_articles)
             summary["t_story_s"] = round(time.time() - t0, 1)
             style0 = "B" if S.get("urgent") else "A"
             media_root = build / "media"

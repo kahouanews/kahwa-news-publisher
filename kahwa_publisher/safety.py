@@ -144,18 +144,19 @@ def cluster_text(c):
 
 CLASSIFY = """أنت محرر معايير في صفحة أخبار عالمية عامة. أخبار الحروب والنزاعات والعمليات العسكرية مسموحة وتُغطّى بأسلوب وقائعي هادئ.
 صنّف كل خبر أدناه (العنوان والملخص). أعد JSON فقط بالشكل:
-{"stories": [{"id": 1, "category": "war_conflict|military|attack|diplomacy|politics|economy|science|health|technology|environment|disaster_accident|society|sports|other", "graphic": true/false, "propaganda": true/false, "unverified": true/false, "needs_banned_country": true/false}]}
+{"stories": [{"id": 1, "category": "war_conflict|military|attack|diplomacy|politics|economy|science|health|technology|environment|disaster_accident|society|religion|sports|other", "graphic": true/false, "propaganda": true/false, "unverified": true/false, "needs_banned_country": true/false}]}
 - graphic=true فقط إذا كان جوهر الخبر تفاصيل دموية أو جثثاً أو تمثيلاً أو قطع رؤوس أو مشاهد مروعة لا يمكن روايته من دونها.
 - propaganda=true إذا كان الخبر دعاية لطرف (ادعاءات طرف واحد تُقدَّم كحقائق، تمجيد أو تحريض، بيانات تعبئة) لا خبراً وقائعياً.
 - unverified=true إذا كان جوهر الخبر ادعاءً غير مؤكد أو شائعة أو "أنباء غير مؤكدة" أو رواية طرف واحد عن وقائع ميدانية دون تأكيد مستقل.
   أما تصريحات المسؤولين وتحذيراتهم وبياناتهم المنسوبة إليهم بالاسم، والوقائع التي تنقلها عدة وسائل إعلام، فليست unverified (التصريح نفسه واقعة مؤكدة).
+- category=religion لأي خبر جوهره الدين: جدل ديني أو فتوى أو رجال دين أو طقوس أو أعياد دينية أو الاحتفال بها أو منعه (مثل الهالوين و"البدعة").
 - needs_banned_country=true إذا كان لا يمكن رواية الخبر دون ذكر المغرب أو الإمارات أو الجزائر أو إسرائيل (بأي صيغة).
 - الحرب والقصف والضربات والصواريخ والمسيرات والعمليات العسكرية والدبلوماسية والكوارث ليست سبباً للرفض بحد ذاتها.
 عند الشك في أي علامة من العلامات الأربع اجعلها true.
 
 الأخبار:
 """
-REJECT_CATS = {"sports"}
+REJECT_CATS = {"sports", "religion"}      # religion: project rule (Law 23-19 risk), 2026-10-31
 try:
     from . import llm as _R
     _R.register(CLASSIFY, {"stories": list})

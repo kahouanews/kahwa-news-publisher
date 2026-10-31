@@ -28,6 +28,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import numbers as NUM
 from . import signals
 from . import safety
 from . import attribution as A
@@ -68,6 +69,47 @@ BLOCK = [
     "حماس تتبنى", "قطع رأس", "إعدام علني", "انتحار", "اغتصاب", "مشاهد مروعة", "فيديو صادم",
     "الإساءة للنبي", "ازدراء الأديان", "تجديف",
 ]
+# Religion (Algerian Law 23-19 risk + project rule "block religion", 2026-10-31): religious debates, clergy, holidays-as-religion
+# stories («بين البدعة والانفتاح.. إلغاء الاحتفال بالهالوين») are never covered. Matched as whole words (with clitics) on
+# normalised text; deliberately no «الدين» (also "the debt") and no «إسلامي» (the Islamic Republic of Iran is politics).
+RELIGION = ["بدعة", "البدعة", "بدع", "حرام", "تحريم", "فتوى", "فتاوى", "الإفتاء", "دار الإفتاء", "مفتي", "المفتي", "الأزهر",
+            "شيخ الأزهر", "الكنيسة", "كنيسة", "الكنائس", "كنائس", "الفاتيكان", "البابا", "بابا الفاتيكان", "المسجد", "مسجد",
+            "مساجد", "المساجد", "ديني", "دينية", "الدينية", "الديني", "الأديان", "الاديان", "ديانة", "الشريعة", "المسيحية",
+            "المسيحيين", "المسيحي", "مسيحي", "مسيحيين", "الهالوين", "هالوين", "عيد الميلاد المجيد", "الكريسماس", "كريسماس",
+            "رمضان", "الحج", "العمرة", "الصلاة", "صلاة", "القرآن", "قرآن", "المصحف", "الإنجيل", "التوراة", "حاخام", "الحاخام",
+            "القس", "الكاهن", "راهب", "رهبان", "الإلحاد", "ملحد", "ملحدين", "التبشير", "تبشير", "التنصير", "الردة", "اليهودية",
+            "السلفية", "سلفي", "الصوفية", "صوفي", "الشيعة", "السنة والشيعة", "طائفي", "طائفية", "الطائفية", "ازدراء", "التجديف",
+            "Halloween", "Vatican", "Pope", "church", "mosque", "religious", "religion"]
+_RELIGION_RE = None
+
+
+def religion_hits(text):
+    """Religion words in a text (whole words, Arabic clitics allowed, harakat/tatweel ignored)."""
+    global _RELIGION_RE
+    if _RELIGION_RE is None:
+        alts = "|".join(re.escape(norm(k).strip()) for k in sorted(RELIGION, key=len, reverse=True))
+        _RELIGION_RE = re.compile(r"(?<![\w])(?:[وفبلك]{0,2})(?:ال)?(?:" + alts + r")(?:ه|ات|ون|ين|يه|ا)?(?![\w])", re.I)
+    return sorted({m.group(0).strip() for m in _RELIGION_RE.finditer(norm(text or ""))})
+
+
+def item_blocked(it):
+    """One feed item that must not feed any product: banned country, BLOCK words or religion (its title or summary)."""
+    t = (it.get("title") or "") + " " + (it.get("summary") or "")
+    return banned_country(t) or any(b in t for b in BLOCK) or bool(religion_hits(t))
+
+
+def purge_items(c):
+    """Drop blocked items (Algeria / banned countries / religion) from a cluster instead of letting a mixed cluster carry them
+    to the writer; the cluster's outlet list is recomputed from what is left (the >=2-outlet rule then applies again)."""
+    keep = [i for i in c["items"] if not item_blocked(i)]
+    if len(keep) == len(c["items"]):
+        return c
+    d = dict(c, items=keep)
+    d["sources"] = sorted({i["src"] for i in keep})
+    d["purged"] = len(c["items"]) - len(keep)
+    return d
+
+
 # user rule 2026-10-28: NO sports news on Kahwa News (sports has its own page)
 SPORTS = ["كرة القدم", "كرة قدم", "مباراة", "مباريات", "الدوري", "دوري", "كأس", "الكونفيدرالية", "أبطال أفريقيا",
           "دوري أبطال", "منتخب", "مدرب", "لاعب", "لاعبين", "هدف", "أهداف", "ركلة", "ملعب", "الفيفا", "فيفا", "يويفا",
@@ -168,7 +210,8 @@ def blocked(c):
     words = set(norm(text).split())
     sport_hits = sum((k in text) if " " in k else (norm(k) in words) for k in SPORTS)
     strong = any((k in text) if " " in k else (norm(k) in words or norm("ال" + k) in words) for k in SPORTS_STRONG)
-    return any(b in text for b in BLOCK) or banned_country(text) or sport_hits >= 2 or strong
+    return any(b in text for b in BLOCK) or banned_country(text) or sport_hits >= 2 or strong or \
+        bool(religion_hits(" ".join(i["title"] for i in c["items"])))      # a religion headline blocks the whole story
 
 
 def load_seen():
@@ -385,7 +428,7 @@ def write_post(c):
     blob = post + " " + (d.get("headline") or "") + " " + (d.get("title") or "")
     d["no_photo"] = sum(w in blob for w in VIOLENT) >= 1 or safety.is_conflict(blob)   # war story -> own visual, no photo
     sub = d.get("subline") or ""
-    if any(n not in src for n in re.findall(r"\d[\d.,]*", sub)) or BAIT.search(sub):
+    if NUM.unsupported(sub, src) or BAIT.search(sub):
         sub = ""                                    # every figure on the card must exist in the sources
     d["subline"] = sub
     if sub:
@@ -466,7 +509,15 @@ REELS_SEEN = ROOT / "state" / "reels_seen.json"
 
 
 def pick_reel_cluster(min_sources=2):
-    """Top verified story for a reel: >=2 outlets, passes the legal/sports/banned filters, not reeled in 3 days."""
+    """Top verified story for a reel (first of pick_reel_clusters)."""
+    cs, seen = pick_reel_clusters(min_sources, n=1)
+    return (cs[0] if cs else None), seen
+
+
+def pick_reel_clusters(min_sources=2, n=3):
+    """Ranked verified stories for a reel: >=2 outlets, passes the legal/sports/banned/religion filters, not reeled in 3 days.
+    Returns ([up to n allowed clusters], seen). The reel maker tries them in order: a story that fails a gate (numbers,
+    primary source, spelling, fact-check) is dropped and the next one is written (2026-10-31)."""
     try:
         seen = json.loads(REELS_SEEN.read_text())
     except Exception:
@@ -482,7 +533,8 @@ def pick_reel_cluster(min_sources=2):
             print(json.dumps({"signal_error": "apply", "err": str(ex)[:200]}))
     cands = []
     for c in clusters:
-        if len(c["sources"]) < min_sources or blocked(c) or is_seen(seen, c):
+        c = purge_items(c)                      # religion / banned-country items out of mixed clusters
+        if not c["items"] or len(c["sources"]) < min_sources or blocked(c) or is_seen(seen, c):
             continue
         text = " ".join(i["title"] + " " + i["summary"] for i in c["items"])
         if not safety.keyword_ok(c):            # war stories allowed (graphic-only reel); graphic/gore sources are not
@@ -494,10 +546,7 @@ def pick_reel_cluster(min_sources=2):
         if len(cands) >= 8:
             break
     allowed = safety.classify(R.bound("classifier"), cands) if cands else {}   # LLM category check, fail closed
-    for c in cands:
-        if allowed.get(c["key"]):
-            return c, seen
-    return None, seen
+    return [c for c in cands if allowed.get(c["key"])][:n], seen
 
 
 def mark_reeled(seen, c):
@@ -537,6 +586,9 @@ def main():
     tier1 = {"BBC عربي", "فرانس 24", "DW عربية", "أخبار الأمم المتحدة"}
     cands = []
     for c in clusters:
+        c = purge_items(c)                           # religion / banned-country items out of mixed clusters
+        if not c["items"]:
+            continue
         multi = len(c["sources"]) >= int(os.getenv("MIN_SOURCES", "2"))
         # fresh story from a tier-1 outlet; judged on the feeds-only score so early-warning boosts never let a
         # single-outlet story through

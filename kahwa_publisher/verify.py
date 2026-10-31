@@ -18,6 +18,8 @@ verify_text(llm, text, sources, kind) -> {"text": final_text, "report": {...}} o
 import json
 import re
 
+from . import numbers as NUM
+
 from . import attribution as A
 from . import llm as R
 
@@ -112,8 +114,9 @@ _AR_NUM_RE = [(d, re.compile(r"(?<![\u0621-\u064A])(?:[وفبل]|ال|وال|ب�
 
 
 def source_numbers(t):
-    """Numbers stated in source text: digits plus small numbers spelled out in Arabic words."""
-    out = numbers(t)
+    """Numbers stated in source text: digits plus numbers spelled out in Arabic words. Since 2026-10-31 also every value
+    kahwa_publisher/numbers.py reads (magnitude words «70 ألف» = 70000, separators 70,000 / 70.000 / 70 000, Arabic digits)."""
+    out = numbers(t) | set(NUM.source_values(t or ""))
     flat = re.sub(r"[\u064B-\u0652\u0640]", "", t or "")
     if re.search(r"(?:أحد|إحدى|اثنا|اثني|اثنتا) عشر", flat):
         out.update(d for d, w in (("11", "أحد عشر"), ("11", "إحدى عشرة"), ("12", "اثنا عشر"), ("12", "اثني عشر"), ("12", "اثنتا عشرة")) if w in flat)
@@ -160,7 +163,6 @@ def check(llm, text, sources, require_attribution=False):
     res = _json(llm(VERIFY + "\nالمصادر:\n" + src_block + "\n\nالادعاءات:\n" + payload, temperature=0.0)).get("results") or []
     by_id = {r.get("id"): r for r in res if isinstance(r, dict)}
     all_src = " ".join(sources)
-    src_nums = source_numbers(all_src)
     bad = []
     for i, c in enumerate(claims):
         cid = c.get("id", i + 1)
@@ -174,7 +176,7 @@ def check(llm, text, sources, require_attribution=False):
                 src = all_src
             if not (quote_in_source(r.get("evidence", ""), src) or quote_in_source(r.get("evidence", ""), all_src)):
                 v, r["note"] = "unsupported", "evidence quote not found in the sources"
-        missing = [n for n in numbers(c["claim"]) if n not in src_nums]
+        missing = [n for n in NUM.unsupported(c["claim"], all_src)]      # values, not digit strings (numbers.py)
         if v == "supported" and missing:
             v, r["note"] = "unsupported", f"figures not in sources: {missing}"
         c.update(verdict=v, source=r.get("source"), evidence=(r.get("evidence") or "")[:200], note=(r.get("note") or "")[:160])
