@@ -31,6 +31,7 @@ BAD_POST_MARKERS = ("too large", "file size", "duration", "aspect ratio", "unsup
 class Result:
     def __init__(self, status, provider, detail="", remote_id=None):
         self.status, self.provider, self.detail, self.remote_id = status, provider, str(detail)[:800], remote_id
+        self.platform_post_id = ""
 
     def __repr__(self):
         return f"Result({self.status}, {self.provider}, {self.remote_id}, {self.detail[:120]!r})"
@@ -150,7 +151,9 @@ class Zernio(Provider):
         st = (plats[0].get("status") or p.get("status") or "").lower()
         err = json.dumps(plats[0].get("error") or data.get("error") or plats[0].get("errorMessage") or "")
         if code in (200, 201) and st == "published":
-            return Result(OK, self.name, plats[0].get("platformPostUrl", ""), pid)
+            r = Result(OK, self.name, plats[0].get("platformPostUrl", ""), pid)
+            r.platform_post_id = plats[0].get("platformPostId") or ""     # the Facebook post id (heartbeat proof)
+            return r
         if st in ("pending", "processing", "publishing", "scheduled", "queued") and pid:
             return Result(UNCERTAIN, self.name, f"status={st}", pid)
         if code == 401:

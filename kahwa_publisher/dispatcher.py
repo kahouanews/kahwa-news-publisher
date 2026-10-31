@@ -22,6 +22,9 @@ QUEUE = ROOT / "queue"
 DONE = ROOT / "queue" / "done"
 FAILED = ROOT / "queue" / "failed"
 STATE = ROOT / "state" / "state.json"
+POSTED = ROOT / "state" / "posted.json"          # duplicate-post guard: (item id, platform) -> when/how it was posted
+HEARTBEAT = ROOT / "state" / "heartbeat.json"    # last post CONFIRMED on Facebook (platform post id / URL), not just "green"
+HEARTBEAT_HOURS = float(os.getenv("HEARTBEAT_HOURS", "4"))
 
 MIN_GAP_MIN = int(os.getenv("MIN_GAP_MINUTES", "75"))   # research 2026-10-28: 75-90 min spacing
 JITTER_MIN = int(os.getenv("JITTER_MINUTES", "15"))
@@ -142,12 +145,47 @@ def mark_ok(st, name):
     pst.update({"fails": 0, "cooldown_until": None, "last_ok": iso(now())})
 
 
+def _jload(p, default):
+    try:
+        return json.loads(p.read_text())
+    except Exception:
+        return default
+
+
+def posted_key(post, platform="facebook"):
+    return f"{post['id']}|{platform}"
+
+
+def already_posted(post, platform="facebook"):
+    return posted_key(post, platform) in _jload(POSTED, {})
+
+
+def remember_posted(post, res, platform="facebook"):
+    led = _jload(POSTED, {})
+    cutoff = iso(now() - timedelta(days=60))
+    led = {k: v for k, v in led.items() if v.get("t", "") >= cutoff}
+    led[posted_key(post, platform)] = {"t": iso(now()), "provider": res.provider, "remote_id": res.remote_id,
+                                       "platform_post": getattr(res, "platform_post_id", "") or res.detail[:200]}
+    POSTED.parent.mkdir(parents=True, exist_ok=True)
+    POSTED.write_text(json.dumps(led, ensure_ascii=False, indent=1))
+
+
+def confirmed_on_facebook(res):
+    pid = getattr(res, "platform_post_id", "") or ""
+    return bool(pid) or "facebook.com" in (res.detail or "")
+
+
 def record_published(st, f, post, res):
     post.setdefault("history", []).append({"t": iso(now()), "provider": res.provider, "status": res.status,
                                            "remote_id": res.remote_id, "detail": res.detail[:200]})
     st["published"].append({"t": iso(now()), "id": post["id"], "kind": post.get("kind", "post"),
                             "provider": res.provider, "remote_id": res.remote_id})
     st["last_published_at"] = iso(now())
+    remember_posted(post, res)
+    if confirmed_on_facebook(res):                # heartbeat only on a confirmed Facebook post id / URL
+        HEARTBEAT.parent.mkdir(parents=True, exist_ok=True)
+        HEARTBEAT.write_text(json.dumps({"t": iso(now()), "id": post["id"], "provider": res.provider,
+                                         "platform_post": getattr(res, "platform_post_id", "") or res.detail[:200]}, indent=1))
     mark_ok(st, res.provider)
     move(f, post, DONE)
     schedule_next(st)
@@ -264,7 +302,7 @@ def run():
     if not queue:
         save_state(st)
         return 0
-    if any(x["id"] == queue[0][1]["id"] for x in st["published"]):
+    if already_posted(queue[0][1]) or any(x["id"] == queue[0][1]["id"] for x in st["published"]):
         move(queue[0][0], queue[0][1], DONE)  # already published (dedupe)
         save_state(st)
         return 0
@@ -331,6 +369,14 @@ def watchdog():
     last = parse(st.get("last_published_at"))
     waiting = len(list(QUEUE.glob("*.json")))
     gp = parse(st.get("global_pause_until"))
+    hb = parse(_jload(HEARTBEAT, {}).get("t"))
+    algeria_h = (now().hour + 1) % 24                    # Africa/Algiers = UTC+1, no DST
+    if 7 <= algeria_h < 23 and last and (not hb or now() - hb > timedelta(hours=HEARTBEAT_HOURS)) \
+            and not (gp and gp > now()) and (not last or now() - last <= timedelta(hours=hours)):
+        alert(st, f"Heartbeat: posts are marked published but none was CONFIRMED on Facebook (post id/URL) for "
+                  f"{HEARTBEAT_HOURS:g}h+ (last confirmed: {_jload(HEARTBEAT, {}).get('t', 'never')}). Check the Page.")
+        save_state(st)
+        return 1
     if waiting and (not last or now() - last > timedelta(hours=hours)) and not (gp and gp > now()):
         if not in_quiet_hours(now()):
             alert(st, f"Watchdog: nothing published for {hours}h+ with {waiting} posts waiting.")

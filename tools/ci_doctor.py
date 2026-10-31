@@ -41,11 +41,20 @@ RULES = [
      "A step ran past its time budget (timeout-minutes). Auto-retried once; repeats = a source or model got slow."),
     ("disk-memory", r"No space left on device|ENOSPC|out of memory|MemoryError|exit code 137|Killed",
      "Runner disk/RAM. The preflight step frees ~20 GB when < 12 GB is free; repeats = output growth (check out/ size)."),
-    ("secret-auth", r"\b401\b|Unauthorized|invalid[_ ]api[_ ]key|API key not valid|PERMISSION_DENIED|token (?:has )?expired|Bad credentials",
+    ("account-suspended", r"account (?:was |has been |is )?suspended|Your account is suspended",
+     "GitHub said the account is suspended. During a GitHub incident this is transient (2026-05-26: GitHub's own review bot "
+     "suspended the Actions service account for ~2 h); otherwise a human must contact GitHub Support."),
+        ("secret-auth", r"\b401\b|Unauthorized|invalid[_ ]api[_ ]key|API key not valid|PERMISSION_DENIED|token (?:has )?expired|Bad credentials",
      "A key was revoked/expired. LLM router skips the provider; publishers fail over (dispatcher). Needs a human to renew the key."),
-    ("llm-quota", r"HTTP 429 daily|quota|RESOURCE_EXHAUSTED|llm_preflight\": false|rate limit",
-     "All LLM providers exhausted. Runs hold (exit 0) when preflight fails; this means quota ran out mid-run. Clears at the next "
-     "quota window; add a provider key to widen the pool."),
+    # 429s (research B, tkana pattern): per-DAY quota -> do not wait or re-run, the router skips that model until the window
+    # resets; per-MINUTE -> transient, a re-run after the backoff succeeds.
+    ("llm-quota-daily", r"HTTP 429 daily|PerDay|per day|tokens per day|\bTPD\b|\bRPD\b|quotaValue\W{0,3}0\b|daily (?:limit|quota)|"
+                        r"exceeded your current quota|llm_preflight\": false",
+     "Daily LLM quota exhausted. Never re-run (same answer until the window resets); the router skips that model. Runs hold "
+     "(exit 0) when preflight finds no writer/checker; this means quota ran out mid-run. Add a provider key to widen the pool."),
+    ("llm-rate-minute", r"PerMinute|per minute|tokens per minute|\bTPM\b|\bRPM\b|HTTP 429|Too Many Requests|rate limit|"
+                        r"RESOURCE_EXHAUSTED|retry in \d+(?:\.\d+)?s",
+     "Per-minute rate limit: transient. The router paces (llm_pace) and rerun.yml re-runs once after a backoff."),
     ("deps-drift", r"ModuleNotFoundError|ImportError|No matching distribution|ERESOLVE|npm ERR!|Could not find a version",
      "A dependency changed or vanished. Deps are pinned (requirements-ci.txt, package.json) with cache restore-keys; check the "
      "last Dependabot merge."),
@@ -62,7 +71,23 @@ RULES = [
 
 
 # Only these are re-run (once, by rerun.yml). Everything else would fail the same way again or is a fail-closed decision.
-TRANSIENT = {"qa-crash", "timeout", "network-source", "git-race", "render-failed"}
+TRANSIENT = {"qa-crash", "timeout", "network-source", "git-race", "render-failed", "llm-rate-minute"}
+
+
+def github_incident():
+    """True when githubstatus.com reports an unresolved incident or a non-'none' indicator (no auth, public JSON)."""
+    try:
+        with urllib.request.urlopen("https://www.githubstatus.com/api/v2/summary.json", timeout=20) as r:
+            d = json.loads(r.read())
+        return d.get("status", {}).get("indicator", "none") != "none" or bool(d.get("incidents"))
+    except Exception:
+        return False
+
+
+def is_transient(cause, incident=None):
+    if cause == "account-suspended":
+        return github_incident() if incident is None else incident
+    return cause in TRANSIENT
 
 
 def classify(text):
@@ -157,9 +182,9 @@ def main():
         logs = job_log(a.rerun_check)
         err = "\n".join(error_text(l) for _, _, l in logs)
         cause, _ = classify(err)
-        print(json.dumps({"run": a.rerun_check, "cause": cause, "transient": cause in TRANSIENT, "error": err[:500]},
-                         ensure_ascii=False))
-        return 0 if cause in TRANSIENT else 3
+        tr = is_transient(cause)
+        print(json.dumps({"run": a.rerun_check, "cause": cause, "transient": tr, "error": err[:500]}, ensure_ascii=False))
+        return 0 if tr else 3
     now = datetime.now(timezone.utc)
     since = (now - timedelta(hours=a.hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
     runs = api("GET", f"/actions/runs?per_page=100&created=>={since}").get("workflow_runs", [])
@@ -173,11 +198,11 @@ def main():
         if r.get("status") != "completed" or r.get("conclusion") not in ("failure", "timed_out", "startup_failure"):
             continue
         upd = datetime.fromisoformat(r["updated_at"].replace("Z", "+00:00"))
-        if r["event"] == "schedule" and r.get("run_attempt", 1) < 2 and now - upd < timedelta(minutes=45):
+        if r["event"] in ("schedule", "workflow_dispatch") and r.get("run_attempt", 1) < 2 and now - upd < timedelta(minutes=45):
             report["skipped_pending_retry"].append(r["id"])
             continue
-        if r["event"] == "workflow_dispatch":
-            continue                    # manual tests fail loudly in the run itself
+        if r["event"] not in ("schedule", "workflow_dispatch", "push", "workflow_run"):
+            continue                    # PRs / dynamic runs: their own UI
         logs = job_log(r["id"])
         err = "\n".join(error_text(l) for _, _, l in logs) or r.get("conclusion", "")
         steps = ", ".join(f"{j}/{s}" for j, s, _ in logs)

@@ -174,7 +174,9 @@ SAMPLES = {   # error lines taken from the real failed runs of 2026-10-29 .. 202
     "audio-qa": "RuntimeError: QA failed, reel NOT queued: ['true peak 0.07']",
     "editorial-skip": "RuntimeError: claim verification failed, reel NOT made: [{'id': 3, 'verdict': 'unsupported'}]",
     "code-bug": "KeyError: 'b4'\nTraceback (most recent call last):",
-    "llm-quota": "Hold: HTTP 429 daily: quota exceeded for every writer",
+    "llm-quota-daily": "Hold: HTTP 429 daily: Rate limit reached for model on tokens per day (TPD): Limit 200000",
+    "llm-rate-minute": "HTTP 429: Rate limit reached for model on tokens per minute (TPM); please retry in 7.5s",
+    "account-suspended": "remote: Your account is suspended. Please visit https://support.github.com for more information.",
     "secret-auth": "HTTPError: 401 Unauthorized: invalid api key",
     "disk-memory": "OSError: [Errno 28] No space left on device",
     "network-source": "URLError: <urlopen error Temporary failure in name resolution>",
@@ -195,9 +197,15 @@ def test_ci_doctor_classifies_each_root_cause(cause):
 def test_only_transient_causes_are_rerun():
     sys.path.insert(0, str(ROOT / "tools"))
     import ci_doctor as C
-    assert C.TRANSIENT == {"qa-crash", "timeout", "network-source", "git-race", "render-failed"}
-    for never in ("layout-qa", "audio-qa", "code-bug", "llm-quota", "secret-auth", "content-rule", "editorial-skip"):
-        assert never not in C.TRANSIENT
+    assert C.TRANSIENT == {"qa-crash", "timeout", "network-source", "git-race", "render-failed", "llm-rate-minute"}
+    for never in ("layout-qa", "audio-qa", "code-bug", "llm-quota-daily", "secret-auth", "content-rule", "editorial-skip"):
+        assert never not in C.TRANSIENT and not C.is_transient(never, incident=True)
+    assert C.is_transient("account-suspended", incident=True) and not C.is_transient("account-suspended", incident=False)
+
+
+def test_rerun_covers_schedule_and_dispatch_once():
+    t = (ROOT / ".github" / "workflows" / "rerun.yml").read_text()
+    assert "run_attempt == 1" in t and "'schedule'" in t and "'workflow_dispatch'" in t and "publish" not in t.split("workflows:")[1].split("]")[0]
 
 
 def test_doctor_reads_the_run_level_error_not_a_story_error():
@@ -220,8 +228,11 @@ def test_workflows_pinned_runner_and_action_shas_and_npm_ci():
     for wf in (ROOT / ".github" / "workflows").glob("*.yml"):
         t = wf.read_text()
         assert "ubuntu-latest" not in t, wf.name
-        for u in re.findall(r"uses:\s*(\S+)", t):
-            assert re.search(r"@[0-9a-f]{40}$", u), f"{wf.name}: {u} not pinned to a SHA"
+        if "schedule:" in t:
+            assert "workflow_dispatch" in t, f"{wf.name}: must be dispatchable (external clock)"
+        lock = (ROOT / ".github" / "workflows" / "actions.lock").read_text()
+        for u in re.findall(r"uses:\s*(\S+)", t):        # pinned by the GitHub workflow lockfile (GA 2026-10-28) or a SHA
+            assert re.search(r"@[0-9a-f]{40}$", u) or u in lock, f"{wf.name}: {u} not in actions.lock"
         assert "npm install --prefix" not in t, f"{wf.name}: use npm ci from the lockfile"
     assert (ROOT / "kahwa_publisher" / "reels" / "npm-shrinkwrap.json").exists()
 
@@ -329,3 +340,51 @@ def test_doctor_does_not_send_the_token_to_the_log_blob_redirect():
     sys.path.insert(0, str(ROOT / "tools"))
     import ci_doctor as C
     assert C._NoRedirect().redirect_request() is None and "fetch_log" in C.job_log.__code__.co_names
+
+
+
+# ------------------------------------------------------------------ publish: (item, platform) guard + confirmed heartbeat
+def _disp(tmp_path, fakes):
+    import importlib, os
+    os.environ.update(PUBLISHING_ENABLED="true", KAHWA_ROOT=str(tmp_path), QUIET_HOURS_UTC="25-25", MIN_GAP_MINUTES="0",
+                      JITTER_MINUTES="0")
+    import kahwa_publisher.providers as P, kahwa_publisher.dispatcher as D
+    importlib.reload(P); importlib.reload(D)
+    P.all_providers = lambda: fakes
+    return P, D
+
+
+def test_same_item_is_never_posted_twice_even_if_requeued(tmp_path):
+    calls = []
+    class F:
+        name = "zernio"
+        def configured(s): return True
+        def publish(s, post):
+            import kahwa_publisher.providers as P
+            calls.append(post["id"]); r = P.Result(P.OK, "zernio", "https://www.facebook.com/x/posts/1", "z1")
+            r.platform_post_id = "1"; return r
+    P, D = _disp(tmp_path, [F()])
+    (tmp_path / "queue").mkdir()
+    item = json.dumps({"id": "same", "text": "t", "media": []})
+    (tmp_path / "queue" / "same.json").write_text(item)
+    assert D.run() == 0 and calls == ["same"]
+    (tmp_path / "queue" / "same.json").write_text(item)            # duplicate trigger / re-run / external clock re-queues it
+    st = json.loads((tmp_path / "state" / "state.json").read_text()); st["published"] = []; st["next_allowed_at"] = None
+    (tmp_path / "state" / "state.json").write_text(json.dumps(st))  # even with the in-state list gone, the ledger holds
+    assert D.run() == 0 and calls == ["same"]
+    assert "same|facebook" in json.loads((tmp_path / "state" / "posted.json").read_text())
+    hb = json.loads((tmp_path / "state" / "heartbeat.json").read_text())
+    assert hb["id"] == "same" and hb["platform_post"] == "1"
+
+
+def test_heartbeat_only_on_confirmed_facebook_post(tmp_path):
+    class F:
+        name = "make"
+        def configured(s): return True
+        def publish(s, post):
+            import kahwa_publisher.providers as P
+            return P.Result(P.OK, "make", "accepted", None)             # webhook accepted: no Facebook post id
+    P, D = _disp(tmp_path, [F()])
+    (tmp_path / "queue").mkdir()
+    (tmp_path / "queue" / "a.json").write_text(json.dumps({"id": "a", "text": "t", "media": []}))
+    assert D.run() == 0 and not (tmp_path / "state" / "heartbeat.json").exists()

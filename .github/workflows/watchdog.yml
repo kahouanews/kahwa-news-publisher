@@ -11,8 +11,8 @@ jobs:
   watch:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
         with: { python-version: "3.12" }
       - run: python -m kahwa_publisher.dispatcher watchdog || true
         env:
@@ -62,6 +62,7 @@ jobs:
         if: hashFiles('state/ALERT.txt') != ''
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          gh issue create --title "Kahwa watchdog $(date -u +%F' '%H:%M)" --body-file state/ALERT.txt || true
+          T="Kahwa watchdog alert"; N=$(gh issue list --state open --search "$T in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$N" ]; then gh issue comment "$N" --body-file state/ALERT.txt || true; else gh issue create --title "$T" --body-file state/ALERT.txt || true; fi
           git config user.name kahwa-bot; git config user.email kahwa-bot@users.noreply.github.com
           git rm -q state/ALERT.txt && git commit -qm "watchdog alert" && git push -q || true

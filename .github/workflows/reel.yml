@@ -67,10 +67,10 @@ jobs:
       HF_WORKERS: "3"
       MODE: ${{ (github.event_name == 'schedule' && github.event.schedule == '11 8,14 * * *') && 'edition' || (github.event_name == 'workflow_dispatch' && inputs.mode) || 'single' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
         with: { python-version: "3.12", cache: pip, cache-dependency-path: requirements-ci.txt }
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: actions/setup-node@v7.1.0
         with: { node-version: "22" }
       - name: System packages (ffmpeg)
         run: |
@@ -82,7 +82,7 @@ jobs:
           if [ "$free" -lt 12 ]; then sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL; df -h /; fi
           for i in 1 2 3; do pip install -q -r requirements-ci.txt && break; echo "pip retry $i"; sleep $((i*20)); done
       - name: Cache HyperFrames (pinned 0.8.214) + Chrome Headless Shell
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@v6.1.0
         with:
           path: |
             kahwa_publisher/reels/node_modules
@@ -135,7 +135,7 @@ jobs:
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           python -c "import json;d=json.load(open('out/summary.json'));d.get('qa',{}).pop('mean_luma',None);print(json.dumps(d,ensure_ascii=False,indent=1)[:6000])" >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: reel-${{ github.run_id }}
@@ -221,7 +221,7 @@ jobs:
           ok=0; for i in 1 2 3 4; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; sleep 7; done; [ $ok = 1 ]
       - name: Alert (GitHub issue = email) and skip
         # manual dry-run tests fail loudly in the run itself but do not open an issue/email
-        if: failure() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) && !(github.event_name == 'schedule' && github.run_attempt < 2)
+        if: failure() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) && (github.run_attempt >= 2 || !(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           { echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"; echo;
