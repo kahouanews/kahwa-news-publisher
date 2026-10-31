@@ -11,7 +11,7 @@ Design
   cron-job.org and the Worker share one definition. cron-job.org / the Worker must use the same minutes.
 - Slot = inputs.slot when given (snapped onto the grid), else the run start time snapped back to the most recent grid time.
 - Stale guard: a slot older than WINDOW[workflow] when the run starts is skipped (a morning bulletin never airs at 18:00;
-  JHBot pattern). Within the window, the first successful run of a slot marks it done in state/slots.json; later runs of the
+  JHBot pattern). Within the window, the first successful run of a slot marks it done in state/slots/<workflow>.json; later runs of the
   same slot (the other clocks) skip. A FAILED run does not mark the slot, so the backup clock / rerun.yml can still deliver it.
 - The gate job checks out `main` at job start (not the trigger SHA), so a run queued behind another run of the same workflow
   (per-workflow concurrency group) always sees the marker the first run pushed.
@@ -30,7 +30,7 @@ from pathlib import Path
 
 ROOT = Path(os.getenv("KAHWA_ROOT", Path(__file__).resolve().parent.parent))
 WF_DIR = Path(os.getenv("KAHWA_WF_DIR", Path(__file__).resolve().parent.parent / ".github" / "workflows"))
-STATE = ROOT / "state" / "slots.json"
+STATE_DIR = ROOT / "state" / "slots"            # one file per workflow: workflows never conflict on a marker commit
 # how long after its scheduled time a slot may still run (minutes)
 WINDOW = {"publish": 20, "newsroom": 120, "watchdog": 120, "reel": 150, "bulletin": 360}
 KEEP_DAYS = 10
@@ -91,25 +91,29 @@ def key(workflow, slot):
 
 
 # ------------------------------------------------------------------ state
-def load():
+def _file(k):
+    return STATE_DIR / f"{k.split('@', 1)[0]}.json"
+
+
+def load(k):
     try:
-        return json.loads(STATE.read_text())
+        return json.loads(_file(k).read_text())
     except Exception:
         return {}
 
 
 def is_done(k, st=None):
-    return k in (st if st is not None else load())
+    return k in (st if st is not None else load(k))
 
 
 def mark_done(k, run_id=None, now=None):
     now = now or datetime.now(timezone.utc)
-    st = load()
+    st = load(k)
     cutoff = (now - timedelta(days=KEEP_DAYS)).strftime("%Y-%m-%dT%H:%M")
     st = {kk: v for kk, v in st.items() if kk.split("@", 1)[-1] >= cutoff}
     st[k] = {"t": now.isoformat(timespec="seconds"), "run": run_id}
-    STATE.parent.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps(st, indent=1, sort_keys=True))
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    _file(k).write_text(json.dumps(st, indent=1, sort_keys=True))
     return st
 
 

@@ -458,3 +458,15 @@ def test_every_scheduled_workflow_is_gated_and_dispatchable_with_a_bare_body():
         for k, v in on["workflow_dispatch"]["inputs"].items():                 # {"ref":"main"} = production behaviour
             assert not (k == "dry_run" and v.get("default") is True), f"{wf}: bare dispatch would be a dry run"
     assert yaml.safe_load((ROOT / ".github/workflows/reel.yml").read_text())[True]["workflow_dispatch"]["inputs"]["mode"]["default"] == "auto"
+
+
+def test_slot_markers_are_per_workflow_files(tmp_path, monkeypatch):
+    SL = _slots(tmp_path, monkeypatch)                  # run 41190343334: one shared file -> rebase conflict between workflows
+    SL.mark_done("publish@2026-11-01T10:47Z")
+    SL.mark_done("watchdog@2026-11-01T09:33Z")
+    files = sorted(p.name for p in (tmp_path / "state" / "slots").glob("*.json"))
+    assert files == ["publish.json", "watchdog.json"]
+    assert SL.is_done("publish@2026-11-01T10:47Z") and not SL.is_done("publish@2026-11-01T11:07Z")
+    for wf in ("publish", "newsroom", "watchdog", "reel", "bulletin"):
+        t = (ROOT / ".github" / "workflows" / f"{wf}.yml").read_text()
+        assert "git reset -q --hard origin/main" in t and "git add state/slots" in t

@@ -122,8 +122,14 @@ jobs:
       - name: Mark slot done (first successful run of the slot; the other clocks then skip at the gate)
         if: success() && needs.gate.outputs.key != ''
         run: |
-          python3 -m kahwa_publisher.slots done newsroom "${{ needs.gate.outputs.key }}"
+          # earlier steps already pushed their own commits (or the job failed): re-apply the marker on the newest main each
+          # try, so a concurrent bot commit can never leave a rebase conflict (run 41190343334)
           git config user.name kahwa-bot; git config user.email kahwa-bot@users.noreply.github.com
-          git add state/slots.json
-          git diff --cached --quiet || git commit -qm "slot done ${{ needs.gate.outputs.key }}"
-          ok=0; for i in 1 2 3 4 5; do git pull --rebase --autostash -q && git push -q && { ok=1; break; }; sleep $((i*5)); done; [ $ok = 1 ]
+          ok=0; for i in 1 2 3 4 5; do
+            git rebase --abort 2>/dev/null || true
+            git fetch -q origin main && git reset -q --hard origin/main
+            python3 -m kahwa_publisher.slots done newsroom "${{ needs.gate.outputs.key }}"
+            git add state/slots
+            git diff --cached --quiet && { ok=1; break; }
+            git commit -qm "slot done ${{ needs.gate.outputs.key }}" && git push -q origin HEAD:main && { ok=1; break; }
+            sleep $((i*5)); done; [ $ok = 1 ]
