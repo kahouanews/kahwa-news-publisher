@@ -324,6 +324,8 @@ def run():
 
 def watchdog():
     """Alert if nothing was published for too long while posts are waiting."""
+    if (ROOT / "state" / "PAUSE").exists() or os.getenv("PUBLISHING_ENABLED", "false").lower() != "true":
+        return 0                                   # publishing is off by choice: a waiting queue is expected, not an alert
     st = load_state()
     hours = int(os.getenv("WATCHDOG_HOURS", "5"))
     last = parse(st.get("last_published_at"))

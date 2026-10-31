@@ -311,3 +311,21 @@ def test_dispatcher_fails_over_when_health_circuit_is_open(tmp_path):
             calls.append(s.name); return P.Result(P.OK, s.name, "x", "rid")
     P.all_providers = lambda: [F("zernio"), F("buffer"), F("make")]
     assert D.run() == 0 and calls == ["buffer"]
+
+
+def test_watchdog_is_silent_while_publishing_is_disabled(tmp_path, monkeypatch):
+    import importlib
+    monkeypatch.setenv("KAHWA_ROOT", str(tmp_path))
+    monkeypatch.setenv("PUBLISHING_ENABLED", "false")
+    import kahwa_publisher.dispatcher as D
+    importlib.reload(D)
+    (tmp_path / "queue").mkdir()
+    for i in range(3):
+        (tmp_path / "queue" / f"{i}.json").write_text("{}")
+    assert D.watchdog() == 0 and not (tmp_path / "state" / "ALERT.txt").exists()
+
+
+def test_doctor_does_not_send_the_token_to_the_log_blob_redirect():
+    sys.path.insert(0, str(ROOT / "tools"))
+    import ci_doctor as C
+    assert C._NoRedirect().redirect_request() is None and "fetch_log" in C.job_log.__code__.co_names

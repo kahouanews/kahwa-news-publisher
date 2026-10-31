@@ -98,6 +98,28 @@ def error_text(log):
     return "\n".join(lines[-40:])[-3000:]
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def fetch_log(job_id):
+    """The logs endpoint answers 302 to a signed blob URL; our Bearer header must NOT follow the redirect (the blob store
+    rejects it with an auth error, which once got misread as a 'secret-auth' failure)."""
+    req = urllib.request.Request(f"{API}/actions/jobs/{job_id}/logs", headers={
+        "Accept": "application/vnd.github+json", "Authorization": f"Bearer {TOKEN}", "X-GitHub-Api-Version": "2022-11-28"})
+    op = urllib.request.build_opener(_NoRedirect)
+    try:
+        with op.open(req, timeout=60) as r:
+            return r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        loc = e.headers.get("Location") if e.code in (301, 302, 303, 307, 308) else None
+        if not loc:
+            raise
+    with urllib.request.urlopen(loc, timeout=120) as r:
+        return r.read().decode("utf-8", "replace")
+
+
 def job_log(run_id):
     jobs = api("GET", f"/actions/runs/{run_id}/jobs?filter=latest").get("jobs", [])
     bad = [j for j in jobs if j.get("conclusion") in ("failure", "timed_out", "cancelled")] or jobs
@@ -105,9 +127,9 @@ def job_log(run_id):
     for j in bad[:2]:
         step = next((s["name"] for s in j.get("steps", []) if s.get("conclusion") == "failure"), "?")
         try:
-            log = api("GET", f"/actions/jobs/{j['id']}/logs", raw=True).decode("utf-8", "replace")
-        except urllib.error.HTTPError as ex:
-            log = f"(log unavailable: HTTP {ex.code})"
+            log = fetch_log(j["id"])
+        except Exception as ex:
+            log = f"(log unavailable: {type(ex).__name__})"
         out.append((j["name"], step, log))
     return out
 
@@ -159,7 +181,10 @@ def main():
         logs = job_log(r["id"])
         err = "\n".join(error_text(l) for _, _, l in logs) or r.get("conclusion", "")
         steps = ", ".join(f"{j}/{s}" for j, s, _ in logs)
-        cause, fix = classify(err if err.strip() else "\n".join(l for _, _, l in logs))
+        if not logs or all(l.startswith("(log unavailable") for _, _, l in logs):
+            cause, fix = "unknown", "The run log could not be read; open the run."
+        else:
+            cause, fix = classify(err if err.strip() else "\n".join(l for _, _, l in logs))
         title = f"Kahwa CI: {r['name']} - {cause}"
         url = r["html_url"]
         body = (f"Run: {url} (attempt {r.get('run_attempt', 1)}, {r['event']}, {r['head_sha'][:7]}, {r['created_at']})\n"
