@@ -1,0 +1,20 @@
+{
+ "zernio": {
+  "checked": "2026-10-31T09:25:12+00:00",
+  "state": "ok",
+  "detail": {
+   "accountId": "6ae2116d642a6c0b39d28000",
+   "username": "Kahwa news",
+   "status": "healthy",
+   "canPost": true,
+   "tokenValid": true,
+   "tokenExpiresAt": "2026-12-17T15:14:53.178Z",
+   "needsReconnect": false,
+   "disconnectReason": null,
+   "disconnectionType": null,
+   "unhealthySince": null,
+   "issues": []
+  },
+  "open": false
+ }
+}
