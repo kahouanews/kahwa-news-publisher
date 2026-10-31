@@ -1,0 +1,10 @@
+# Pinned render/test deps for every workflow (2026-10-31). Versions = PyPI latest that the green runs of 2026-10-30/31 used.
+# Updated weekly by Dependabot; a bump only lands when tests + a dry fixture render pass (.github/workflows/deps-automerge.yml).
+numpy==2.5.4
+opencv-python-headless==5.0.0.93
+pillow==13.0.0
+soundfile==0.14.0
+pyloudnorm==0.2.0
+feedparser==6.0.14
+cryptography==50.0.2
+pytest==9.2.0

@@ -1,0 +1,24 @@
+# Weekly dependency PRs. They merge themselves only when deps-automerge.yml's test job (pytest + a dry fixture render, no
+# secrets, read-only token, npm ci --ignore-scripts) passes. HyperFrames minor/major bumps are never proposed (render changes
+# need a human look); patch bumps are.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule: { interval: weekly, day: monday, time: "03:00", timezone: "Africa/Algiers" }
+    open-pull-requests-limit: 3
+    groups: { python: { patterns: ["*"] } }
+  - package-ecosystem: npm
+    directory: "/kahwa_publisher/reels"
+    schedule: { interval: weekly, day: monday, time: "03:00", timezone: "Africa/Algiers" }
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: "hyperframes"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@hyperframes/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: weekly, day: monday, time: "03:00", timezone: "Africa/Algiers" }
+    open-pull-requests-limit: 3
+    groups: { actions: { patterns: ["*"] } }

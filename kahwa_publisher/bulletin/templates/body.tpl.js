@@ -424,6 +424,20 @@
   const g = el("div", "grain ov", root, null, { zIndex: 11 });
   tl.fromTo(g, { backgroundPosition: "0px 0px" }, { backgroundPosition: `${37 * 97}px ${53 * 97}px`, duration: B.duration, ease: `steps(${Math.round(B.duration * 15)})`, immediateRender: true }, 0);
   tl.set({}, {}, B.duration);
+  // ------------------------------------------------------------------ self-healing layout (make.py heal loop, 2026-10-31)
+  // A scene that failed DOM QA comes back with s.fit = 1..3: every element of that scene is scaled by FIT[level] (computed
+  // sizes are read first, then written, so nested sizes never compound); level 3 also hides the map pills. Deterministic,
+  // and re-checked by the same DOM QA, so a fix is only kept when the safe zone / overlap / rail checks pass.
+  const FIT = [1, 0.86, 0.74, 0.64];
+  B.scenes.forEach((s) => {
+    const lv = Math.min(3, s.fit | 0); if (!lv) return;
+    const sc = scenesL.querySelector('[data-scene="' + s.id + '"]'); if (!sc) return;
+    sc.classList.add("fit" + lv);
+    const els = [...sc.querySelectorAll("*")].filter((e) => !(e instanceof SVGElement));
+    const fs = els.map((e) => parseFloat(getComputedStyle(e).fontSize) || 0);
+    els.forEach((e, i) => { if (fs[i]) e.style.fontSize = (fs[i] * FIT[lv]).toFixed(1) + "px"; });
+    if (lv >= 3) sc.querySelectorAll(".map-label").forEach((e) => { e.style.display = "none"; });
+  });
   MAPS.forEach((f) => f());
   window.KAHWA_TL = tl;
   tl.seek(0);

@@ -182,6 +182,41 @@ def handle_uncertain(st, provs):
     return pending
 
 
+# Self-healing publisher order (2026-10-31): KEY_EXPIRIES = "NAME=YYYY-MM-DD ..." (repo variable, also read by the watchdog).
+# A provider whose secret has expired is skipped (no failed call, no cooldown churn); one expiring within KEY_DEMOTE_DAYS is
+# moved to the end so the next publisher takes over before the key dies. Prefix match: BUFFER_API_KEY -> provider "buffer".
+KEY_PREFIX = {"zernio": "ZERNIO_", "buffer": "BUFFER_", "make": "MAKE_"}
+
+
+def key_expiries(env=None):
+    out = {}
+    for kv in (env if env is not None else os.getenv("KEY_EXPIRIES", "")).split():
+        if "=" in kv:
+            k, v = kv.split("=", 1)
+            try:
+                out[k.strip()] = datetime.strptime(v.strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except ValueError:
+                pass
+    return out
+
+
+def order_by_key_expiry(provs, t, env=None):
+    exp = key_expiries(env)
+    demote_days = int(os.getenv("KEY_DEMOTE_DAYS", "3"))
+    keep, late, expired = [], [], []
+    for p in provs:
+        pre = KEY_PREFIX.get(p.name, p.name.upper() + "_")
+        dates = [d for k, d in exp.items() if k.startswith(pre)]
+        first = min(dates) if dates else None
+        if first and first <= t:
+            expired.append(p.name)
+        elif first and first - t <= timedelta(days=demote_days):
+            late.append(p)
+        else:
+            keep.append(p)
+    return keep + late, expired
+
+
 def run():
     st = load_state()
     t = now()
@@ -195,6 +230,15 @@ def run():
         save_state(st)
         return 0
     provs = [p for p in P.all_providers() if p.configured()]
+    provs, expired = order_by_key_expiry(provs, t)
+    if expired:
+        log(st, "provider key expired: skipped (automatic failover)", providers=expired)
+    from . import health as H                     # watchdog's connection health check (Zernio /accounts/health)
+    hh = H.load()
+    down = [p.name for p in provs if H.is_open(p.name, hh)]
+    if down and len(down) < len(provs):           # never skip the last one on a health verdict alone
+        provs = [p for p in provs if p.name not in down]
+        log(st, "provider connection down (health check): skipped (automatic failover)", providers=down)
     if not provs:
         alert(st, "No publisher is configured (missing API keys in GitHub Secrets).")
         save_state(st)

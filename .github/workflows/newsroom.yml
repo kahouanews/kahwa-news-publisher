@@ -24,16 +24,16 @@ concurrency:
   cancel-in-progress: false
 jobs:
   write:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45   # write + fact-check + claim verification per story; Groq free tier is paced (8K TPM, 1K output TPM)
     env:
       DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
       LLM_CHAIN_WRITER: ${{ github.event_name == 'workflow_dispatch' && inputs.writer_models || '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
-      - run: pip install -q feedparser "pillow>=10.1"
+      - run: pip install -q feedparser==6.0.14 pillow==13.0.0   # pinned (requirements-ci.txt)
       - name: LLM models, probes and availability (manual runs)
         if: github.event_name == 'workflow_dispatch' && inputs.llm_probe
         continue-on-error: true
@@ -71,7 +71,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           grep -E '"signals"|"verify"|qa_reason|rejected_by_qa|written_dry|signal_error|llm_error|"llm|held|safety_' out.log | cut -c1-1500 >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && env.DRY == 'true'
         with:
           name: newsroom-dry-${{ github.run_id }}

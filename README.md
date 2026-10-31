@@ -31,6 +31,17 @@ We attribute (Berne Convention art. 10bis, Meta's originality signal "credit the
 - **Internal only:** the ≥2-outlet verification is unchanged and logged (`{"verified_by_outlets": …}` in the run log, `sources`/`verified_by_outlets` in queue items, `outlets` in the reel `summary.json`); providers never publish these fields.
 - Series tags (فهم الخبر، العالم في 30 ثانية، بالأرقام) remain our own brand. Tests: `tests/test_attribution.py`.
 
+## Self-healing (2026-10-31, `work/ci-fix-2026-10-31.md` in the project notes)
+
+- **Layout heal** (`bulletin/make.heal_layout`): DOM QA failures no longer kill the bulletin. A broken scene gets fit level 1→2→3 (smaller type; level 3 hides map pills), re-checked by the same QA; still broken → that shot / segment / «باختصار» is dropped. Banned-name and map-rule hits are never healed (fail closed). DOM QA crashes retry once on a new port.
+- **True-peak guard** (`reels/audio.py`): 4× oversampled limiter after loudnorm + final-file guard that trims AAC overshoot (`fix_true_peak`), reels and bulletins.
+- **Degradation ladder** (`fallback.py`): video fails after verification → a card post from the same verified lines (skipped if the story is already covered). One "degraded" issue thread.
+- **Idempotent slots**: `slot` on every queue item (`bulletin-YYYY-MM-DD`, `reel-YYYY-MM-DD-HH`); a slot already queued/done is skipped (safe for duplicate triggers; `workflow_dispatch` input `slot` for an external cron).
+- **Re-run transient failures once** (`rerun.yml` + `tools/ci_doctor.py --rerun-check`): only qa-crash / timeout / network / git race / render crash; never layout, audio, content, code, quota or auth failures; `publish` is never re-run.
+- **CI doctor** (watchdog): classifies every failed run, one issue per (workflow, cause), reports disabled workflows. No keepalive hack, no AI.
+- **Publisher health** (`health.py`, watchdog): Zernio `/v1/accounts/health` → circuit opens on disconnect / expired token / 401 → dispatcher skips Zernio (Buffer → Make); issue 7 days before `tokenExpiresAt`; closes by itself when healthy. `KEY_EXPIRIES` (e.g. `BUFFER_API_KEY=2026-11-27`): expired publisher keys skipped, expiring ones demoted 3 days before.
+- **Supply chain**: `ubuntu-24.04`, actions pinned to SHAs, `npm ci --ignore-scripts` from `kahwa_publisher/reels/npm-shrinkwrap.json`, pinned `requirements-ci.txt`; Dependabot weekly; `deps-automerge.yml` merges only after pytest + a dry fixture render in a no-secrets, read-only job. `ci.yml`: tests on push + nightly dry fixture renders.
+
 ## Repository variables (Settings → Secrets and variables → Actions → Variables)
 
 | Variable | Values | Effect |

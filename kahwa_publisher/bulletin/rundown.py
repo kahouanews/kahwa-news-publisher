@@ -314,6 +314,10 @@ def build(spec, mode="bulletin"):
         add(id="end", type="end", d=5.0, l1=END_BULLETIN, credits="<br>".join(credits))
     else:
         add(id="end", type="end", d=3.4, l1="العالم في 30 ثانية", l2="قهوة نيوز", credits="خرائط: Natural Earth")
+    fit = spec.get("_fit") or {}                   # self-healing layout levels from make.heal_layout (scene id -> 1..3)
+    for s in SC:
+        if fit.get(s["id"]):
+            s["fit"] = int(fit[s["id"]])
     t0 = 0.0
     for s in SC:
         s["t"] = round(t0, 3)

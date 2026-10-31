@@ -229,8 +229,33 @@ def loudnorm(in_wav, out_wav, I=-14, TP=-1.5, LRA=11):
     m = json.loads(j)
     af = (f"loudnorm=I={I}:TP={TP}:LRA={LRA}:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
           f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true")
+    af += "," + TP_LIMITER       # linear loudnorm cannot hold TP when the gain pushes peaks up (runs 41053869183, 41105257205)
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", in_wav, "-af", af, "-ar", "48000", out_wav], check=True)
     return out_wav
+
+
+# 4x-oversampled brick-wall limiter at -2 dBFS: catches inter-sample peaks before the AAC encode adds its own overshoot.
+TP_LIMITER = "aresample=192000,alimiter=limit=0.794:attack=1:release=60:level=0,aresample=48000"
+
+
+def fix_true_peak(mp4, limit=-1.0, target=-1.5, tries=2):
+    """Final-file guard (the encoder adds overshoot after any limiter): if the finished MP4's true peak is above `limit`,
+    re-encode only its audio with the excess removed (video copied) and measure again. Returns (lufs, tp, steps)."""
+    import os, shutil
+    steps = []
+    I, TP = measure(str(mp4))
+    for _ in range(tries):
+        if TP <= limit:
+            break
+        g = round(target - TP, 2)
+        tmp = str(mp4) + ".tp.mp4"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(mp4), "-map", "0:v:0?", "-map", "0:a:0", "-c:v", "copy",
+                        "-af", f"volume={g}dB," + TP_LIMITER, "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
+                        "-movflags", "+faststart", tmp], check=True)
+        shutil.move(tmp, str(mp4))
+        steps.append({"tp_before": TP, "gain_db": g})
+        I, TP = measure(str(mp4))
+    return I, TP, steps
 
 
 def measure(path):

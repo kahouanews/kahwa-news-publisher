@@ -345,7 +345,11 @@ def finish(out, Pn, out_mp4):
                     "-t", str(Pn["duration"]), "-shortest", "-map_metadata", "-1", "-movflags", "+faststart", str(final)], check=True)
     Path(out_mp4).parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(final, out_mp4)
-    return qa(out_mp4, Pn)
+    _, _, tp_steps = audio.fix_true_peak(out_mp4)       # self-heal: AAC overshoot above -1 dBTP -> trim and re-encode audio
+    res = qa(out_mp4, Pn)
+    if tp_steps:
+        res["tp_fix"] = tp_steps
+    return res
 
 
 def qa(path, Pn):

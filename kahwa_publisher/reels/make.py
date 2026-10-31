@@ -128,6 +128,10 @@ def main():
     dry = a.dry or not publishing
     t0 = time.time()
     summary = {"dry": dry, "publishing_enabled": publishing}
+    S = c = seen = None
+    gated = False
+    from .. import fallback as FB
+    slot = FB.slot_key("reel", slot=os.getenv("KAHWA_SLOT"))
     try:
         build = Path(os.getenv("KAHWA_BUILD", "/tmp/kahwa-reel"))
         if a.story:
@@ -136,6 +140,11 @@ def main():
             seen = c = None
         else:
             from ..newsroom import mark_reeled, pick_reel_cluster
+            if not dry and FB.slot_done(slot):        # idempotent: a duplicated trigger / re-run never makes a 2nd reel
+                summary["result"] = f"skipped: slot {slot} already done"
+                (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1))
+                log(summary)
+                return 0
             ok, why = R.preflight()
             log({"llm_preflight": ok, "detail": why})
             if not ok:                # no writer or no independent fact-checker: hold, spend no quota, exit 0
@@ -196,6 +205,7 @@ def main():
             if bad:
                 raise Rejected(f"claim verification failed, reel NOT made: {bad[:3]}")
         gate(S)
+        gated = True                                   # every line of S is verified + screen-gated from here on
         (out / "story.json").write_text(json.dumps(S, ensure_ascii=False, indent=1))
         mp4 = out / f"{S['id']}-reel.mp4"
         res = render_story(S, style, mp4, build=build, media_root=media_root, workers=a.workers)
@@ -220,6 +230,8 @@ def main():
             t_st, mixw = RN.sting("X", sb / "sting-X.mp4", sb, hhmm, a.workers, pings_ll=ll)
             tmp = build / "with-sting.mp4"
             RN.prepend_sting(sb / "sting-X.mp4", mixw, mp4, tmp, sb / "work")
+            from ..reels import audio as _AU
+            _AU.fix_true_peak(tmp, limit=-1.0, target=-1.2)
             q2 = RN.qa_file(tmp)
             if q2["problems"]:
                 raise RuntimeError(f"QA failed after the alert sting, reel NOT queued: {q2['problems']}")
@@ -233,7 +245,8 @@ def main():
                     "media": [{"type": "video", "url": url}], "priority": 4 if style == "B" else 6, "sources": S["sources"],
                     "verified_by_outlets": c["sources"],   # internal only
                     "created": now.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
-                    "not_before": (now + timedelta(minutes=45)).strftime("%Y-%m-%dT%H:%M:%S+00:00"), "style": style}
+                    "not_before": (now + timedelta(minutes=45)).strftime("%Y-%m-%dT%H:%M:%S+00:00"), "style": style,
+                    "slot": slot}
             (out / "queue-item.json").write_text(json.dumps(item, ensure_ascii=False, indent=1))
             mark_reeled(seen, c)
             SP.record(sting_state, "alert" if summary["alert_sting"]["used"] else "reel", item["id"])
@@ -265,9 +278,29 @@ def main():
     except Exception as ex:
         summary["result"] = "failed"
         summary["error"] = f"{type(ex).__name__}: {str(ex)[:1500]}"
+        if gated and S is not None and c is not None:  # degradation ladder: verified story -> card post instead of nothing
+            try:
+                if FB.story_covered(c.get("key")):
+                    summary["fallback"] = "story already covered by a queued/published post: nothing extra"
+                else:
+                    item, img = FB.card_from_reel(S, out, S["id"])
+                    item["slot"] = slot
+                    summary["fallback"] = {"card": img.name, "queued": not dry}
+                    if not dry:
+                        (out / "fallback-item.json").write_text(json.dumps(item, ensure_ascii=False, indent=1))
+                        mark_reeled(seen, c)
+                summary["result"] = "degraded: video failed, card fallback"
+                (out / "degraded.txt").write_text(f"Kahwa reel degraded (video failed, card fallback used).\n\n{summary['error']}\n")
+                (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1))
+                log({"run_error": summary["error"]})
+                log(summary)
+                return 0
+            except Exception as ex2:
+                summary["fallback_error"] = f"{type(ex2).__name__}: {str(ex2)[:300]}"
         (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1))
         (out / "error.txt").write_text(
             "Kahwa reel failed and was skipped (nothing was posted).\n\n" + summary["error"] + "\n\n" + traceback.format_exc()[-3000:])
+        log({"run_error": summary["error"]})      # own line for tools/ci_doctor.py
         log(summary)
         return 1
 

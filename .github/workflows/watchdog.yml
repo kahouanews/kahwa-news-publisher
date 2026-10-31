@@ -6,19 +6,43 @@ on:
 permissions:
   contents: write
   issues: write
+  actions: read
 jobs:
   watch:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
       - run: python -m kahwa_publisher.dispatcher watchdog || true
+      - name: Publisher connection health (Zernio /accounts/health -> circuit + one issue per problem)
+        continue-on-error: true
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          ZERNIO_API_KEY: ${{ secrets.ZERNIO_API_KEY }}
+          ZERNIO_FB_ACCOUNT_ID: ${{ vars.ZERNIO_FB_ACCOUNT_ID }}
+        run: |
+          python -m kahwa_publisher.health
+          python - <<'PY'
+          import json, subprocess
+          for i in json.load(open("health-issues.json")):
+              n = subprocess.run(["gh", "issue", "list", "--state", "open", "--search", i["title"] + " in:title", "--json", "title"],
+                                 capture_output=True, text=True).stdout
+              if not any(x["title"] == i["title"] for x in json.loads(n or "[]")):
+                  subprocess.run(["gh", "issue", "create", "--title", i["title"], "--body", i["body"]])
+          PY
+          git config user.name kahwa-bot; git config user.email kahwa-bot@users.noreply.github.com
+          git add state/provider_health.json
+          git diff --cached --quiet || { git commit -qm "provider health $(date -u +%FT%TZ)"; for i in 1 2 3 4; do git pull --rebase --autostash -q && git push -q && break; sleep 7; done; }
+      - name: CI doctor (classify failed runs -> one issue per workflow+cause; report disabled workflows; no AI, no secrets)
+        env: { GH_TOKEN: "${{ github.token }}" }
+        continue-on-error: true
+        run: python tools/ci_doctor.py --hours 26
       - name: API key expiry reminder (one issue per key, from 14 days before expiry)
         env:
           GH_TOKEN: "${{ github.token }}"
           # NAME=YYYY-MM-DD list; SambaNova free key created 2026-10-29 expires after ~3 months
-          KEY_EXPIRIES: ${{ vars.KEY_EXPIRIES || 'SAMBANOVA_API_KEY=2027-01-29' }}
+          KEY_EXPIRIES: ${{ vars.KEY_EXPIRIES || 'SAMBANOVA_API_KEY=2027-01-29 BUFFER_API_KEY=2026-11-27' }}
         run: |
           for kv in $KEY_EXPIRIES; do
             name=${kv%%=*}; exp=${kv##*=}
@@ -28,7 +52,7 @@ jobs:
             if gh issue list --state open --search "$title in:title" --json number --jq 'length' | grep -qx 0; then
               printf '%s\n' "The $name API key expires on $exp ($left days left)." \
                 "Create a new free key, update the GitHub Actions secret $name, then update the repo variable KEY_EXPIRIES." \
-                "Until then the LLM router skips the provider cleanly (fact-checks fall to the next independent model)." > key.txt
+                "Until then: LLM keys -> the router skips the provider; publisher keys (BUFFER_/ZERNIO_/MAKE_) -> the dispatcher demotes it 3 days before and skips it after expiry (automatic failover)." > key.txt
               gh issue create --title "$title" --body-file key.txt || true
             fi
           done

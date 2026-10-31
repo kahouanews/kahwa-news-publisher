@@ -11,13 +11,13 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
-      - run: pip install -q cryptography
+      - run: pip install -q cryptography==50.0.2   # pinned (requirements-ci.txt)
       - name: Publish next due post (with failover)
         id: run
         continue-on-error: true
@@ -32,6 +32,8 @@ jobs:
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
           PUBLISHING_ENABLED: ${{ vars.PUBLISHING_ENABLED }}
           DAILY_CAP: ${{ vars.DAILY_CAP }}
+          # expired publisher keys are skipped, expiring ones demoted (dispatcher.order_by_key_expiry)
+          KEY_EXPIRIES: ${{ vars.KEY_EXPIRIES || 'SAMBANOVA_API_KEY=2027-01-29 BUFFER_API_KEY=2026-11-27' }}
         run: python -m kahwa_publisher.dispatcher
       - name: Save state (also keeps the schedule alive)
         if: always()

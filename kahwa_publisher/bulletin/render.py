@@ -349,7 +349,15 @@ def dom_qa(comp, times, outfile, shots=None, timeout=1500):
             chrome = ""
     env = dict(os.environ, CHROME=chrome, NODE_PATH=str(REELS / "node_modules"))
     cmd = ["node", str(HERE / "qa.mjs"), str(comp), ",".join(f"{t:.2f}" for t in times), str(shots or "")]
-    r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
+    for attempt in range(2):         # a navigation timeout / stuck port (run 40945212474) is transient: one retry, new port
+        env["PORT"] = str(8766 + attempt * 17 + (os.getpid() % 13))
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
+        except subprocess.TimeoutExpired as ex:
+            r = subprocess.CompletedProcess(cmd, 124, "", f"timeout after {timeout}s: {ex}")
+        if not r.returncode:
+            break
+        time.sleep(5)
     if r.returncode:
         raise RuntimeError(f"DOM QA crashed: {r.stderr[:900]}")
     Path(outfile).write_text(r.stdout)
