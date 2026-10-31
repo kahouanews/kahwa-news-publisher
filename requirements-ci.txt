@@ -8,3 +8,4 @@ pyloudnorm==0.2.0
 feedparser==6.0.14
 cryptography==50.0.2
 pytest==9.2.0
+pyyaml==6.0.3
